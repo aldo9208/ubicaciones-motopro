@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ubicaciones · Moto Pro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --concreto:#E7EAEE;
+  --concreto-2:#D6DBE2;
+  --superficie:#FFFFFF;
+  --tinta:#15181C;
+  --tinta-2:#5A626D;
+  --linea:#C3CAD4;
+  --azul:#12518F;
+  --azul-claro:#E3EDF8;
+  --ambar:#E8A413;
+  --ambar-claro:#FDF3DC;
+  --rojo:#B32318;
+  --verde:#0E6F4D;
+  --r:6px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--concreto);
+  color:var(--tinta);
+  font-family:Inter,system-ui,sans-serif;
+  font-size:15px;line-height:1.45;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+h1,h2,h3,.despl{font-family:Oswald,Impact,sans-serif;font-weight:600;letter-spacing:.02em}
+code,.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+button{cursor:pointer}
+
+/* ---------- Encabezado ---------- */
+.barra{
+  position:sticky;top:0;z-index:40;background:var(--tinta);color:#fff;
+  padding:10px 14px calc(10px + env(safe-area-inset-top)) 14px;
+  padding-top:calc(10px + env(safe-area-inset-top));
+  display:flex;align-items:center;gap:10px;
+}
+.marca{font-family:Oswald;font-size:19px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;line-height:1}
+.marca span{color:var(--ambar)}
+.estado{margin-left:auto;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#9AA3B0;display:flex;align-items:center;gap:6px}
+.punto{width:7px;height:7px;border-radius:50%;background:#4B5563}
+.punto.ok{background:#22A06B}.punto.err{background:#E5484D}
+
+/* ---------- Pestañas ---------- */
+.tabs{display:flex;background:#22262C;position:sticky;top:0;z-index:39;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{
+  flex:1 0 auto;background:none;border:0;padding:11px 16px;color:#9AA3B0;
+  font-family:Oswald;font-size:14px;letter-spacing:.07em;text-transform:uppercase;
+  border-bottom:3px solid transparent;white-space:nowrap;
+}
+.tab.on{color:#fff;border-bottom-color:var(--ambar)}
+.tab .num{font-family:'JetBrains Mono';font-size:11px;background:var(--ambar);color:#15181C;border-radius:9px;padding:1px 6px;margin-left:6px;font-weight:700}
+
+.panel{padding:14px;max-width:900px;margin:0 auto}
+.oculto{display:none !important}
+
+/* ---------- Buscador ---------- */
+.buscador{display:flex;gap:8px;margin-bottom:12px}
+.campo-buscar{
+  flex:1;display:flex;align-items:center;background:var(--superficie);
+  border:2px solid var(--tinta);border-radius:var(--r);padding:0 10px;
+}
+.campo-buscar input{flex:1;border:0;outline:0;padding:13px 6px;background:none;font-size:16px;font-weight:500}
+.campo-buscar svg{flex:none;opacity:.45}
+.btn-cam{
+  flex:none;width:52px;border:2px solid var(--tinta);background:var(--tinta);color:#fff;
+  border-radius:var(--r);display:grid;place-items:center;
+}
+.btn-cam:active{background:#000}
+
+/* ---------- Ficha de artículo ---------- */
+.lista{display:flex;flex-direction:column;gap:8px}
+.ficha{
+  background:var(--superficie);border:1px solid var(--linea);border-left:4px solid var(--azul);
+  border-radius:var(--r);padding:11px 13px;
+}
+.ficha.pend{border-left-color:var(--ambar);background:var(--ambar-claro)}
+.ficha-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.clave{font-family:'JetBrains Mono';font-weight:700;font-size:14px;letter-spacing:-.02em}
+.exist{margin-left:auto;font-family:'JetBrains Mono';font-size:12px;font-weight:700;color:var(--tinta-2);white-space:nowrap}
+.exist b{font-size:16px;color:var(--tinta)}
+.exist.cero b{color:#98A0AB}
+.desc{font-size:13.5px;color:var(--tinta-2);margin:3px 0 9px;line-height:1.35}
+
+/* ---------- Firma: etiqueta de anaquel ---------- */
+.tag{display:inline-flex;align-items:stretch;border-radius:4px;overflow:hidden;font-family:Oswald;font-size:13px;letter-spacing:.05em;line-height:1;border:1px solid var(--tinta)}
+.tag>span{padding:6px 9px;display:flex;align-items:center;white-space:nowrap}
+.tag .t1{background:var(--tinta);color:#fff;font-weight:700}
+.tag .t2{background:var(--concreto-2);color:var(--tinta);border-left:1px solid var(--tinta)}
+.tag .t3{background:var(--superficie);color:var(--tinta);border-left:1px dashed var(--linea)}
+.tag.alt{opacity:.72;font-size:12px}
+.tag.vacio{border-style:dashed;border-color:var(--ambar)}
+.tag.vacio .t1{background:var(--ambar-claro);color:#7A5400;font-weight:600}
+.tags{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+.btn-mini{
+  border:1px solid var(--tinta);background:none;border-radius:4px;padding:6px 11px;
+  font-family:Oswald;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;
+}
+.btn-mini:active{background:var(--tinta);color:#fff}
+.obs{margin-top:8px;font-size:12px;color:var(--rojo);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+
+/* ---------- Genéricos ---------- */
+.vacio-msg{text-align:center;padding:48px 20px;color:var(--tinta-2)}
+.vacio-msg .grande{font-family:Oswald;font-size:20px;color:var(--tinta);margin-bottom:6px}
+.resumen{font-size:12px;color:var(--tinta-2);margin-bottom:10px;letter-spacing:.03em}
+.btn{
+  border:2px solid var(--tinta);background:var(--tinta);color:#fff;border-radius:var(--r);
+  padding:12px 18px;font-family:Oswald;font-size:15px;letter-spacing:.06em;text-transform:uppercase;width:100%;
+}
+.btn.sec{background:none;color:var(--tinta)}
+.btn:disabled{opacity:.4}
+.tarjeta{background:var(--superficie);border:1px solid var(--linea);border-radius:var(--r);padding:16px;margin-bottom:12px}
+.tarjeta h3{margin:0 0 4px;font-size:17px;text-transform:uppercase;letter-spacing:.05em}
+.tarjeta p{margin:0 0 14px;font-size:13px;color:var(--tinta-2)}
+label.lbl{display:block;font-family:Oswald;font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--tinta-2);margin:14px 0 5px}
+select,input[type=text],input[type=password],textarea{
+  width:100%;padding:11px 10px;border:1px solid var(--linea);border-radius:4px;
+  background:var(--superficie);font-size:16px;outline:0;
+}
+select:focus,input:focus,textarea:focus{border-color:var(--azul);box-shadow:0 0 0 3px var(--azul-claro)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--azul);outline-offset:2px}
+
+/* ---------- Mapa de ubicaciones ---------- */
+.mueble{background:var(--superficie);border:1px solid var(--linea);border-radius:var(--r);margin-bottom:8px;overflow:hidden}
+.mueble-cab{display:flex;align-items:center;gap:10px;padding:13px;background:var(--tinta);color:#fff;width:100%;border:0;text-align:left}
+.mueble-cab .nom{font-family:Oswald;font-size:16px;letter-spacing:.06em;text-transform:uppercase}
+.mueble-cab .cnt{margin-left:auto;font-family:'JetBrains Mono';font-size:12px;color:#9AA3B0}
+.sub{padding:6px 13px 13px}
+.sub-fila{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--concreto)}
+.sub-fila:last-child{border-bottom:0}
+.sub-fila .cnt{margin-left:auto;font-family:'JetBrains Mono';font-size:12px;color:var(--tinta-2)}
+
+/* ---------- Modal ---------- */
+.velo{position:fixed;inset:0;background:rgba(21,24,28,.6);z-index:60;display:flex;align-items:flex-end;justify-content:center}
+.modal{background:var(--concreto);width:100%;max-width:560px;max-height:92vh;overflow-y:auto;border-radius:12px 12px 0 0;padding:18px 16px calc(20px + env(safe-area-inset-bottom))}
+@media(min-width:640px){.velo{align-items:center}.modal{border-radius:10px}}
+.modal h2{margin:0 0 2px;font-size:20px;text-transform:uppercase;letter-spacing:.04em}
+.modal .sub-t{font-size:13px;color:var(--tinta-2);margin:0 0 4px}
+.acciones{display:flex;gap:8px;margin-top:20px}
+.acciones .btn{flex:1}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+@media(max-width:420px){.grid3{grid-template-columns:1fr}}
+.aviso{background:var(--ambar-claro);border-left:4px solid var(--ambar);padding:11px 13px;border-radius:0 4px 4px 0;font-size:13px;margin:12px 0}
+.aviso.malo{background:#FDECEA;border-left-color:var(--rojo)}
+.aviso.bien{background:#E6F4EE;border-left-color:var(--verde)}
+#lector{width:100%;border-radius:var(--r);overflow:hidden}
+.cargando{text-align:center;padding:60px 20px;color:var(--tinta-2);font-family:Oswald;letter-spacing:.08em;text-transform:uppercase}
+.filtros{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;scrollbar-width:none}
+.filtros::-webkit-scrollbar{display:none}
+.chip{border:1px solid var(--linea);background:var(--superficie);border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;white-space:nowrap}
+.chip.on{background:var(--tinta);color:#fff;border-color:var(--tinta)}
+@media(prefers-reduced-motion:no-preference){.ficha{animation:sube .18s ease both}}
+@keyframes sube{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+
+<div class="barra">
+  <div class="marca">MOTO<span>PRO</span></div>
+  <div style="font-family:Oswald;font-size:13px;letter-spacing:.1em;color:#9AA3B0;text-transform:uppercase">Ubicaciones</div>
+  <div class="estado"><span class="punto" id="punto"></span><span id="txt-estado">Conectando</span></div>
+</div>
+
+<div class="tabs">
+  <button class="tab on" data-t="buscar">Buscar</button>
+  <button class="tab" data-t="mapa">Almacén</button>
+  <button class="tab" data-t="pend">Sin ubicar<span class="num" id="n-pend">0</span></button>
+  <button class="tab" data-t="admin">Sincronizar</button>
+</div>
+
+<!-- BUSCAR -->
+<div class="panel" id="p-buscar">
+  <div class="buscador">
+    <div class="campo-buscar">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="q" type="text" placeholder="Clave, descripción o código" autocomplete="off" enterkeyhint="search">
+    </div>
+    <button class="btn-cam" id="btn-scan" title="Escanear código de barras">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><path d="M6 12h12" stroke-width="2.4"/></svg>
+    </button>
+  </div>
+  <div class="filtros">
+    <button class="chip on" data-f="todo">Todo</button>
+    <button class="chip" data-f="conex">Con existencia</button>
+    <button class="chip" data-f="sinub">Sin ubicar</button>
+  </div>
+  <div id="resumen-b" class="resumen"></div>
+  <div class="lista" id="res"></div>
+</div>
+
+<!-- MAPA -->
+<div class="panel oculto" id="p-mapa">
+  <div class="resumen" id="resumen-m"></div>
+  <div id="mapa"></div>
+</div>
+
+<!-- PENDIENTES -->
+<div class="panel oculto" id="p-pend">
+  <div class="resumen" id="resumen-p"></div>
+  <div class="lista" id="lista-pend"></div>
+</div>
+
+<!-- ADMIN -->
+<div class="panel oculto" id="p-admin">
+  <div class="tarjeta">
+    <h3>Cargar archivo de SAIT</h3>
+    <p>Sube el Excel de existencias. La app actualiza descripciones y cantidades, y manda las claves nuevas a <b>Sin ubicar</b>. Las ubicaciones que ya capturaste no se tocan.</p>
+    <input type="file" id="archivo" accept=".xlsx,.xls,.csv" style="width:100%">
+    <div id="prev-import"></div>
+    <div style="height:12px"></div>
+    <button class="btn" id="btn-import" disabled>Procesar archivo</button>
+  </div>
+  <div class="tarjeta">
+    <h3>Respaldo</h3>
+    <p>Descarga todo el catálogo con sus ubicaciones en Excel.</p>
+    <button class="btn sec" id="btn-export">Descargar Excel</button>
+  </div>
+</div>
+
+<div id="modales"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  collection, getDocs, doc, setDoc, writeBatch, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+/* ============ CONFIGURACIÓN ============ */
+const CONFIG_FIREBASE = {
+  apiKey: "AIzaSyCpFCqO25oDdBne1mOiJarY-ZEBBX0jOVk",
+  authDomain: "bellissima-entradas.firebaseapp.com",
+  projectId: "bellissima-entradas",
+  storageBucket: "bellissima-entradas.appspot.com"
+};
+const COLECCION = "motopro_ubicaciones";
+const CLAVE_ADMIN = "motopro2026";   // <-- cámbiala por la que quieras
+
+/* ============ CATÁLOGO DE UBICACIONES ============ */
+const MUEBLES = ["VITRINA 1","VITRINA 2","VITRINA 3","VITRINA 4",
+  "ANAQUEL 1","ANAQUEL 2","ANAQUEL 3","ANAQUEL 4","ANAQUEL 5",
+  "EXHIBIPANEL","BODEGA","USO TALLER","MERMA"];
+const NIVELES = ["ESTANTE 1","ESTANTE 2","ESTANTE 3","ESTANTE 4","ESTANTE 5","ESTANTE 6",
+  "FILA 1","FILA 2","FILA 3","FILA 4","FILA 5","FILA 6","FILA 7","FILA 8",
+  "PISO","CAJA","COMPUTADORA","APARTADO"];
+const POSICIONES = ["CAJON 1","CAJON 2","CAJON 3","CAJON 4"];
+
+/* ============ NORMALIZACIÓN ============ */
+const sinAcentos = s => (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+function limpiar(v){
+  if(v===null||v===undefined) return "";
+  let s = sinAcentos(String(v)).toUpperCase().trim();
+  s = s.replace(/\s+/g," ");
+  s = s.replace(/^\d+\s+(?=[A-Z])/,"");          // "9 BODEGA" -> "BODEGA"
+  s = s.replace(/\b(VITRINA|ANAQUEL|ESTANTE|FILA|CAJON)(\d)/g,"$1 $2"); // ANAQUEL5 -> ANAQUEL 5
+  s = s.replace(/^EXIBIPANEL$/,"EXHIBIPANEL").replace(/^EXHIBIDO$/,"EXHIBIPANEL");
+  return s.trim();
+}
+// Clasifica cada valor por lo que ES (mueble / nivel / posición), no por la
+// columna donde venía. Así se corrigen las celdas corridas del Excel.
+function partirUbic(u1,u2,u3){
+  const piezas=[];
+  [u1,u2,u3].forEach(v=>{
+    let s=limpiar(v); if(!s) return;
+    // "FILA 5 CAJON 2" en una sola celda
+    const m=s.match(/^((?:FILA|ESTANTE) \d+)\s+(CAJON \d+)$/);
+    if(m){ piezas.push(m[1],m[2]); } else piezas.push(s);
+  });
+  const mu=[],ni=[],po=[],raro=[];
+  piezas.forEach(s=>{
+    if(MUEBLES.includes(s)) mu.push(s);
+    else if(NIVELES.includes(s)) ni.push(s);
+    else if(POSICIONES.includes(s)) po.push(s);
+    else raro.push(s);
+  });
+  return {
+    u1:mu[0]||"", u2:ni[0]||"", u3:po[0]||"",
+    b1:mu[1]||"", b2:ni[1]||"", b3:po[1]||"",
+    resto: raro.join(" / ")
+  };
+}
+
+/* ============ ESTADO ============ */
+let db, ITEMS=[], porClave=new Map(), esAdmin=false, filtro="todo", pestana="buscar";
+let filasImport=null;
+
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const idDoc = clave => encodeURIComponent(String(clave).trim()).replace(/\./g,"%2E");
+const esc = s => String(s??"").replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function estado(txt, clase){ $("#txt-estado").textContent=txt; $("#punto").className="punto "+(clase||""); }
+
+/* ============ ARRANQUE ============ */
+(async function(){
+  try{
+    const app = initializeApp(CONFIG_FIREBASE);
+    db = initializeFirestore(app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})});
+  }catch(e){
+    db = initializeFirestore(initializeApp(CONFIG_FIREBASE,"alt"),{});
+  }
+  $("#res").innerHTML = '<div class="cargando">Cargando catálogo…</div>';
+  await recargar();
+})();
+
+async function recargar(){
+  try{
+    const snap = await getDocs(collection(db, COLECCION));
+    ITEMS = snap.docs.map(d=>d.data());
+    porClave = new Map(ITEMS.map(i=>[i.clave,i]));
+    ITEMS.forEach(i=> i._busca = sinAcentos((i.clave+" "+(i.desc||"")+" "+(i.cb||""))).toUpperCase());
+    estado(snap.metadata.fromCache?"Sin conexión":"En línea", snap.metadata.fromCache?"":"ok");
+    pintar();
+  }catch(e){
+    estado("Error","err");
+    $("#res").innerHTML = `<div class="aviso malo"><b>No se pudo cargar el catálogo.</b><br>${esc(e.message)}<br><br>Revisa la conexión y vuelve a abrir la app.</div>`;
+  }
+}
+
+/* ============ PESTAÑAS ============ */
+$$(".tab").forEach(b=>b.onclick=()=>{
+  $$(".tab").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  pestana=b.dataset.t;
+  ["buscar","mapa","pend","admin"].forEach(t=>$("#p-"+t).classList.toggle("oculto",t!==pestana));
+  pintar();
+});
+$$(".chip").forEach(b=>b.onclick=()=>{
+  $$(".chip").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  filtro=b.dataset.f; pintar();
+});
+
+let tmr; $("#q").addEventListener("input",()=>{clearTimeout(tmr);tmr=setTimeout(pintar,110)});
+
+/* ============ RENDER ============ */
+const tieneUbic = i => !!(i.u1);
+const pendientes = () => ITEMS.filter(i=>!tieneUbic(i) && (i.exist||0)>0)
+                             .sort((a,b)=>(b.exist||0)-(a.exist||0));
+
+function pintar(){
+  $("#n-pend").textContent = pendientes().length;
+  if(pestana==="buscar") pintarBuscar();
+  if(pestana==="mapa")   pintarMapa();
+  if(pestana==="pend")   pintarPend();
+}
+
+function pintarBuscar(){
+  const q = sinAcentos($("#q").value).toUpperCase().trim();
+  const terminos = q.split(/\s+/).filter(Boolean);
+  let r = ITEMS;
+  if(filtro==="conex") r = r.filter(i=>(i.exist||0)>0);
+  if(filtro==="sinub") r = r.filter(i=>!tieneUbic(i));
+  if(terminos.length) r = r.filter(i=>terminos.every(t=>i._busca.includes(t)));
+  else if(filtro==="todo"){
+    $("#resumen-b").textContent = `${ITEMS.length} claves en el catálogo · ${ITEMS.filter(tieneUbic).length} ubicadas`;
+    $("#res").innerHTML = `<div class="vacio-msg"><div class="grande">Busca una refacción</div>Escribe la clave o parte de la descripción, o escanea el código de barras.</div>`;
+    return;
+  }
+  r.sort((a,b)=>{
+    const ea=(a.exist||0)>0, eb=(b.exist||0)>0;
+    if(ea!==eb) return ea?-1:1;
+    return a.clave.localeCompare(b.clave);
+  });
+  $("#resumen-b").textContent = `${r.length} resultado${r.length===1?"":"s"}`;
+  $("#res").innerHTML = r.length ? r.slice(0,250).map(ficha).join("")
+    : `<div class="vacio-msg"><div class="grande">Sin resultados</div>Prueba con menos palabras o parte de la clave.</div>`;
+  if(r.length>250) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando 250 de ${r.length}. Afina la búsqueda.</div>`);
+  enlazarBotones();
+}
+
+function etiqueta(u1,u2,u3,alt){
+  if(!u1) return `<span class="tag vacio"><span class="t1">Sin ubicar</span></span>`;
+  return `<span class="tag ${alt?'alt':''}"><span class="t1">${esc(u1)}</span>`+
+         (u2?`<span class="t2">${esc(u2)}</span>`:"")+
+         (u3?`<span class="t3">${esc(u3)}</span>`:"")+`</span>`;
+}
+
+function ficha(i){
+  const cero=(i.exist||0)<=0;
+  return `<div class="ficha ${!tieneUbic(i)&&!cero?'pend':''}">
+    <div class="ficha-top">
+      <span class="clave">${esc(i.clave)}</span>
+      <span class="exist ${cero?'cero':''}"><b>${i.exist??0}</b> pz</span>
+    </div>
+    <div class="desc">${esc(i.desc||"—")}</div>
+    <div class="tags">
+      ${etiqueta(i.u1,i.u2,i.u3)}
+      ${i.b1?etiqueta(i.b1,i.b2,i.b3,true):""}
+      <button class="btn-mini" data-editar="${esc(i.clave)}">${tieneUbic(i)?"Cambiar":"Ubicar"}</button>
+    </div>
+    ${i.obs?`<div class="obs">${esc(i.obs)}</div>`:""}
+  </div>`;
+}
+
+function pintarPend(){
+  const p=pendientes();
+  $("#resumen-p").textContent = p.length
+    ? `${p.length} artículos con existencia y sin ubicación asignada`
+    : "";
+  $("#lista-pend").innerHTML = p.length ? p.map(ficha).join("")
+    : `<div class="vacio-msg"><div class="grande">Todo ubicado</div>No hay artículos con existencia sin lugar asignado.</div>`;
+  enlazarBotones();
+}
+
+function pintarMapa(){
+  const mapa=new Map();
+  ITEMS.filter(i=>i.u1).forEach(i=>{
+    if(!mapa.has(i.u1)) mapa.set(i.u1,{total:0,subs:new Map()});
+    const m=mapa.get(i.u1); m.total++;
+    const k=[i.u2,i.u3].filter(Boolean).join(" · ")||"Sin subdividir";
+    m.subs.set(k,(m.subs.get(k)||0)+1);
+  });
+  const orden = [...mapa.entries()].sort((a,b)=>MUEBLES.indexOf(a[0])-MUEBLES.indexOf(b[0]));
+  $("#resumen-m").textContent = `${orden.length} muebles · ${ITEMS.filter(i=>i.u1).length} claves ubicadas`;
+  $("#mapa").innerHTML = orden.map(([nom,m],idx)=>`
+    <div class="mueble">
+      <button class="mueble-cab" data-m="${idx}"><span class="nom">${esc(nom)}</span><span class="cnt">${m.total} claves</span></button>
+      <div class="sub oculto" id="sub-${idx}">
+        ${[...m.subs.entries()].sort((a,b)=>a[0].localeCompare(b[0],'es',{numeric:true}))
+          .map(([k,n])=>`<div class="sub-fila"><span style="font-size:13.5px">${esc(k)}</span><span class="cnt">${n}</span>
+            <button class="btn-mini" data-ver="${esc(nom)}|${esc(k)}">Ver</button></div>`).join("")}
+      </div>
+    </div>`).join("");
+  $$("[data-m]").forEach(b=>b.onclick=()=>$("#sub-"+b.dataset.m).classList.toggle("oculto"));
+  $$("[data-ver]").forEach(b=>b.onclick=()=>{
+    const [mu,sub]=b.dataset.ver.split("|");
+    const lista=ITEMS.filter(i=>i.u1===mu && (([i.u2,i.u3].filter(Boolean).join(" · ")||"Sin subdividir")===sub));
+    abrirModal(`<h2>${esc(mu)}</h2><p class="sub-t">${esc(sub)} · ${lista.length} claves</p>
+      <div class="lista" style="margin-top:14px">${lista.map(ficha).join("")}</div>
+      <div class="acciones"><button class="btn sec" data-cerrar>Cerrar</button></div>`);
+  });
+}
+
+function enlazarBotones(){
+  $$("[data-editar]").forEach(b=>b.onclick=()=>editar(b.dataset.editar));
+}
+
+/* ============ EDITAR UBICACIÓN ============ */
+function opciones(lista,sel){
+  return `<option value=""></option>`+lista.map(o=>`<option ${o===sel?"selected":""}>${o}</option>`).join("");
+}
+async function editar(clave){
+  if(!esAdmin && !(await pedirClave())) return;
+  const i = porClave.get(clave); if(!i) return;
+  abrirModal(`
+    <h2>${esc(i.clave)}</h2>
+    <p class="sub-t">${esc(i.desc||"")}</p>
+    <label class="lbl">Ubicación principal</label>
+    <div class="grid3">
+      <select id="e1">${opciones(MUEBLES,i.u1)}</select>
+      <select id="e2">${opciones(NIVELES,i.u2)}</select>
+      <select id="e3">${opciones(POSICIONES,i.u3)}</select>
+    </div>
+    <label class="lbl">Ubicación secundaria <span style="text-transform:none;letter-spacing:0">(si también hay pieza en otro lado)</span></label>
+    <div class="grid3">
+      <select id="f1">${opciones(MUEBLES,i.b1)}</select>
+      <select id="f2">${opciones(NIVELES,i.b2)}</select>
+      <select id="f3">${opciones(POSICIONES,i.b3)}</select>
+    </div>
+    <label class="lbl">Código de barras</label>
+    <input type="text" id="ecb" value="${esc(i.cb||"")}" placeholder="Escanea o escribe">
+    <button class="btn sec" id="scan-cb" style="margin-top:8px">Escanear con la cámara</button>
+    <label class="lbl">Nota</label>
+    <input type="text" id="eobs" value="${esc(i.obs||"")}" placeholder="Ej. merma, apartado, mal en sistema">
+    <div class="acciones">
+      <button class="btn sec" data-cerrar>Cancelar</button>
+      <button class="btn" id="guardar">Guardar</button>
+    </div>`);
+  $("#scan-cb").onclick = ()=> escanear(txt=>{ $("#ecb").value = txt; });
+  $("#guardar").onclick = async ()=>{
+    const b=$("#guardar"); b.disabled=true; b.textContent="Guardando…";
+    const d={ u1:$("#e1").value, u2:$("#e2").value, u3:$("#e3").value,
+              b1:$("#f1").value, b2:$("#f2").value, b3:$("#f3").value,
+              cb:$("#ecb").value.trim(), obs:$("#eobs").value.trim(),
+              act: new Date().toISOString() };
+    try{
+      await setDoc(doc(db,COLECCION,idDoc(clave)), d, {merge:true});
+      Object.assign(i,d);
+      i._busca = sinAcentos((i.clave+" "+(i.desc||"")+" "+(i.cb||""))).toUpperCase();
+      cerrarModal(); pintar();
+    }catch(e){ b.disabled=false; b.textContent="Guardar";
+      alert("No se pudo guardar: "+e.message); }
+  };
+}
+
+/* ============ CONTRASEÑA ============ */
+function pedirClave(){
+  return new Promise(res=>{
+    abrirModal(`<h2>Contraseña</h2><p class="sub-t">Se necesita para modificar ubicaciones.</p>
+      <input type="password" id="pw" placeholder="Contraseña" autofocus>
+      <div class="acciones"><button class="btn sec" data-cerrar>Cancelar</button><button class="btn" id="ok">Entrar</button></div>`);
+    const intentar=()=>{ if($("#pw").value===CLAVE_ADMIN){ esAdmin=true; cerrarModal(); res(true);} else { $("#pw").value=""; $("#pw").placeholder="Contraseña incorrecta"; } };
+    $("#ok").onclick=intentar;
+    $("#pw").onkeydown=e=>{ if(e.key==="Enter") intentar(); };
+    $("#modales").addEventListener("cerrado",()=>res(false),{once:true});
+  });
+}
+
+/* ============ MODALES ============ */
+function abrirModal(html){
+  $("#modales").innerHTML=`<div class="velo"><div class="modal">${html}</div></div>`;
+  $$("[data-cerrar]").forEach(b=>b.onclick=cerrarModal);
+  $(".velo").onclick=e=>{ if(e.target===$(".velo")) cerrarModal(); };
+  enlazarBotones();
+}
+function cerrarModal(){ pararEscaner(); $("#modales").innerHTML=""; $("#modales").dispatchEvent(new Event("cerrado")); }
+
+/* ============ ESCÁNER ============ */
+let lector=null;
+function escanear(alLeer){
+  abrirModal(`<h2>Escanear código</h2><p class="sub-t">Apunta al código de barras del producto.</p>
+    <div id="lector" style="margin-top:12px"></div>
+    <div class="acciones"><button class="btn sec" data-cerrar>Cancelar</button></div>`);
+  lector = new Html5Qrcode("lector");
+  lector.start({facingMode:"environment"},{fps:10,qrbox:{width:260,height:130}},
+    txt=>{ if(navigator.vibrate) navigator.vibrate(60); pararEscaner(); cerrarModal(); alLeer(txt); },
+    ()=>{}
+  ).catch(e=>{
+    $("#lector").innerHTML=`<div class="aviso malo">No se pudo abrir la cámara. Revisa los permisos del navegador.<br><small>${esc(e.message||e)}</small></div>`;
+  });
+}
+function pararEscaner(){ if(lector){ try{lector.stop().then(()=>lector.clear())}catch(e){} lector=null; } }
+$("#btn-scan").onclick = ()=> escanear(txt=>{
+  const hit = ITEMS.find(i=>i.cb && i.cb===txt) || porClave.get(txt);
+  $("#q").value = hit ? hit.clave : txt;
+  $$(".chip").forEach(x=>x.classList.toggle("on",x.dataset.f==="todo")); filtro="todo";
+  pintar();
+});
+
+/* ============ IMPORTAR ============ */
+$("#archivo").onchange = async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  $("#prev-import").innerHTML='<div class="resumen">Leyendo archivo…</div>';
+  try{
+    const wb = XLSX.read(await f.arrayBuffer(),{type:"array"});
+    const hoja = wb.Sheets[wb.SheetNames[0]];
+    const bruto = XLSX.utils.sheet_to_json(hoja,{header:1,defval:null,raw:true});
+    // localizar la fila de encabezados
+    let hi=-1;
+    for(let r=0;r<Math.min(20,bruto.length);r++){
+      const fila=(bruto[r]||[]).map(c=>limpiar(c));
+      if(fila.some(c=>c==="CLAVE")){ hi=r; break; }
+    }
+    if(hi<0) throw new Error("No encontré una columna llamada 'Clave' en las primeras 20 filas.");
+    const cab = (bruto[hi]||[]).map(c=>limpiar(c));
+    const col = n => cab.findIndex(c=>c===n);
+    const iC=col("CLAVE"), iD=cab.findIndex(c=>c.startsWith("DESCRIPCION")),
+          iE=cab.findIndex(c=>c.startsWith("EXISTENCIA SISTEMA"))>=0?cab.findIndex(c=>c.startsWith("EXISTENCIA SISTEMA")):cab.findIndex(c=>c.startsWith("EXISTENCIA")),
+          iU1=cab.findIndex(c=>c==="UBICACION 1"), iU2=cab.findIndex(c=>c==="UBICACION 2"),
+          iU3=cab.findIndex(c=>c==="UBICACION 3"), iO=cab.findIndex(c=>c.startsWith("OBSERVACION")),
+          iCB=cab.findIndex(c=>c.includes("BARRA")||c==="CODIGO");
+    const traeUbic = iU1>=0;
+    filasImport=[];
+    for(let r=hi+1;r<bruto.length;r++){
+      const f2=bruto[r]||[]; const clave=String(f2[iC]??"").trim();
+      if(!clave || clave.toUpperCase()==="NAN") continue;
+      const o={ clave,
+        desc: iD>=0? String(f2[iD]??"").trim() : "",
+        exist: iE>=0? (Number(f2[iE])||0) : null,
+        cb: iCB>=0? String(f2[iCB]??"").trim() : "",
+        obs: iO>=0? String(f2[iO]??"").trim() : "" };
+      if(traeUbic){
+        const u=partirUbic(f2[iU1],f2[iU2],f2[iU3]);
+        Object.assign(o,{u1:u.u1,u2:u.u2,u3:u.u3,b1:u.b1,b2:u.b2,b3:u.b3});
+        if(u.resto) o.obs = (o.obs?o.obs+" / ":"")+u.resto;
+      }
+      filasImport.push(o);
+    }
+    const nuevas = filasImport.filter(x=>!porClave.has(x.clave));
+    $("#prev-import").innerHTML = `<div class="aviso bien">
+      <b>${filasImport.length} filas leídas.</b><br>
+      ${nuevas.length} claves nuevas · ${filasImport.length-nuevas.length} ya en el catálogo<br>
+      ${traeUbic?"El archivo trae columnas de ubicación: se actualizarán.":"Sin columnas de ubicación: solo se actualizan descripción y existencias."}
+    </div>`;
+    $("#btn-import").disabled=false;
+  }catch(err){
+    filasImport=null; $("#btn-import").disabled=true;
+    $("#prev-import").innerHTML=`<div class="aviso malo"><b>No se pudo leer el archivo.</b><br>${esc(err.message)}</div>`;
+  }
+};
+
+$("#btn-import").onclick = async ()=>{
+  if(!filasImport) return;
+  if(!esAdmin && !(await pedirClave())) return;
+  const b=$("#btn-import"); b.disabled=true;
+  let hechas=0, nuevas=0;
+  try{
+    for(let s=0;s<filasImport.length;s+=400){
+      const trozo=filasImport.slice(s,s+400);
+      const lote=writeBatch(db);
+      trozo.forEach(x=>{
+        const prev=porClave.get(x.clave);
+        if(!prev) nuevas++;
+        const d={clave:x.clave, act:new Date().toISOString()};
+        if(x.desc) d.desc=x.desc;
+        if(x.exist!==null) d.exist=x.exist;
+        if(x.cb) d.cb=x.cb;
+        if(x.obs) d.obs=x.obs;
+        if("u1" in x){ d.u1=x.u1; d.u2=x.u2; d.u3=x.u3; d.b1=x.b1; d.b2=x.b2; d.b3=x.b3; }
+        else if(!prev){ d.u1=""; d.u2=""; d.u3=""; }
+        lote.set(doc(db,COLECCION,idDoc(x.clave)), d, {merge:true});
+      });
+      await lote.commit();
+      hechas+=trozo.length;
+      b.textContent=`Guardando ${hechas} / ${filasImport.length}…`;
+    }
+    b.textContent="Procesar archivo";
+    $("#prev-import").innerHTML=`<div class="aviso bien"><b>Listo.</b> ${hechas} claves guardadas, ${nuevas} nuevas.</div>`;
+    await recargar();
+  }catch(e){
+    b.disabled=false; b.textContent="Procesar archivo";
+    $("#prev-import").innerHTML=`<div class="aviso malo"><b>Se interrumpió en la fila ${hechas}.</b><br>${esc(e.message)}</div>`;
+  }
+};
+
+/* ============ EXPORTAR ============ */
+$("#btn-export").onclick = ()=>{
+  const filas = [...ITEMS].sort((a,b)=>a.clave.localeCompare(b.clave)).map(i=>({
+    Clave:i.clave, Descripcion:i.desc||"", Existencia:i.exist??0,
+    "Ubicacion 1":i.u1||"", "Ubicacion 2":i.u2||"", "Ubicacion 3":i.u3||"",
+    "Alt 1":i.b1||"", "Alt 2":i.b2||"", "Alt 3":i.b3||"",
+    "Codigo barras":i.cb||"", Observaciones:i.obs||"", Actualizado:i.act||""
+  }));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), "Ubicaciones");
+  XLSX.writeFile(wb, `ubicaciones_motopro_${new Date().toISOString().slice(0,10)}.xlsx`);
+};
+</script>
+</body>
+</html>
