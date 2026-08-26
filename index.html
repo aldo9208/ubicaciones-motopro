@@ -130,6 +130,34 @@ select,input[type=text],input[type=password],textarea{
 select:focus,input:focus,textarea:focus{border-color:var(--azul);box-shadow:0 0 0 3px var(--azul-claro)}
 button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--azul);outline-offset:2px}
 
+/* ---------- Precio ---------- */
+.renglon-precio{display:flex;align-items:center;gap:10px;margin:2px 0 10px;flex-wrap:wrap}
+.precio{font-family:Oswald;font-size:22px;font-weight:700;letter-spacing:.01em;line-height:1}
+.precio small{font-family:Inter;font-size:10px;font-weight:600;color:var(--tinta-2);letter-spacing:.08em;text-transform:uppercase;margin-left:6px}
+.sin-precio{font-family:Oswald;font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--rojo)}
+.btn-mini.destacado{margin-left:auto;background:var(--azul);color:#fff;border-color:var(--azul)}
+.btn-mini.destacado:active{background:#0C3D6E}
+.precios-int{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 6px}
+.precios-int>div{background:var(--superficie);border:1px solid var(--linea);border-radius:4px;padding:9px 10px;text-align:center}
+.precios-int span{display:block;font-family:Oswald;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--tinta-2)}
+.precios-int b{display:block;font-family:Oswald;font-size:18px;margin:2px 0}
+.precios-int small{display:block;font-size:10px;color:var(--tinta-2)}
+.precios-int>div:first-child{border-color:var(--azul);background:var(--azul-claro)}
+.nota-precio{font-size:11.5px;color:var(--tinta-2);margin:0}
+
+/* ---------- Modo mostrador ---------- */
+.mostrador{text-align:center}
+.m-foto{background:var(--concreto-2);border-radius:8px;min-height:230px;display:grid;place-items:center;overflow:hidden;margin-bottom:14px}
+.m-foto img{width:100%;height:auto;max-height:52vh;object-fit:contain;display:block}
+.m-cargando,.m-sinfoto{color:var(--tinta-2);font-family:Oswald;letter-spacing:.06em;text-transform:uppercase;padding:40px 20px}
+.m-sinfoto small{display:block;font-family:Inter;text-transform:none;letter-spacing:0;font-size:12px;margin-top:6px}
+.m-desc{font-size:17px;font-weight:600;line-height:1.3;margin-bottom:10px}
+.m-precio{font-family:Oswald;font-size:44px;font-weight:700;line-height:1}
+.m-precio small{display:block;font-family:Inter;font-size:11px;font-weight:600;color:var(--tinta-2);letter-spacing:.09em;text-transform:uppercase;margin-top:4px}
+.m-disp{margin-top:12px;font-family:Oswald;font-size:14px;letter-spacing:.1em;text-transform:uppercase;padding:8px;border-radius:4px}
+.m-disp.si{background:#E6F4EE;color:var(--verde)}
+.m-disp.no{background:var(--concreto-2);color:var(--tinta-2)}
+
 /* ---------- Mapa de ubicaciones ---------- */
 .mueble{background:var(--superficie);border:1px solid var(--linea);border-radius:var(--r);margin-bottom:8px;overflow:hidden}
 .mueble-cab{display:flex;align-items:center;gap:10px;padding:13px;background:var(--tinta);color:#fff;width:100%;border:0;text-align:left}
@@ -236,7 +264,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, getDocs, doc, setDoc, writeBatch, serverTimestamp
+  collection, getDocs, getDoc, doc, setDoc, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ============ CONFIGURACIÓN ============ */
@@ -247,7 +275,15 @@ const CONFIG_FIREBASE = {
   storageBucket: "bellissima-entradas.appspot.com"
 };
 const COLECCION = "motopro_ubicaciones";
+const COL_FOTOS = "motopro_fotos";
 const CLAVE_ADMIN = "motopro2026";   // <-- cámbiala por la que quieras
+const IVA = 0.16;                     // Precio 1 viene sin IVA en SAIT
+
+// Claves que Excel corrompió al pegar un rango encima
+const CLAVES_CORREGIDAS = { "F0+1618:1688203KS11":"F0203KS11" };
+
+const pesos = n => "$"+(Number(n)||0).toLocaleString("es-MX",{minimumFractionDigits:2,maximumFractionDigits:2});
+const conIva = n => (Number(n)||0)*(1+IVA);
 
 /* ============ CATÁLOGO DE UBICACIONES ============ */
 const MUEBLES = ["VITRINA 1","VITRINA 2","VITRINA 3","VITRINA 4",
@@ -387,6 +423,11 @@ function etiqueta(u1,u2,u3,alt){
          (u3?`<span class="t3">${esc(u3)}</span>`:"")+`</span>`;
 }
 
+function precioHtml(i){
+  if(!i.p1 || i.p1<=0) return `<span class="sin-precio">Sin precio en SAIT</span>`;
+  return `<span class="precio">${pesos(conIva(i.p1))}<small>c/IVA</small></span>`;
+}
+
 function ficha(i){
   const cero=(i.exist||0)<=0;
   return `<div class="ficha ${!tieneUbic(i)&&!cero?'pend':''}">
@@ -395,6 +436,10 @@ function ficha(i){
       <span class="exist ${cero?'cero':''}"><b>${i.exist??0}</b> pz</span>
     </div>
     <div class="desc">${esc(i.desc||"—")}</div>
+    <div class="renglon-precio">
+      ${precioHtml(i)}
+      <button class="btn-mini destacado" data-mostrador="${esc(i.clave)}">Mostrar al cliente</button>
+    </div>
     <div class="tags">
       ${etiqueta(i.u1,i.u2,i.u3)}
       ${i.b1?etiqueta(i.b1,i.b2,i.b3,true):""}
@@ -445,6 +490,95 @@ function pintarMapa(){
 
 function enlazarBotones(){
   $$("[data-editar]").forEach(b=>b.onclick=()=>editar(b.dataset.editar));
+  $$("[data-mostrador]").forEach(b=>b.onclick=()=>mostrador(b.dataset.mostrador));
+}
+
+/* ============ FOTOS ============ */
+const cacheFotos = new Map();
+async function fotoDe(clave){
+  if(cacheFotos.has(clave)) return cacheFotos.get(clave);
+  try{
+    const s = await getDoc(doc(db,COL_FOTOS,idDoc(clave)));
+    const img = s.exists()? s.data().img : null;
+    cacheFotos.set(clave,img); return img;
+  }catch(e){ return null; }
+}
+function comprimir(file, max=900, calidad=.72){
+  return new Promise((res,rej)=>{
+    const fr=new FileReader();
+    fr.onload=()=>{ const im=new Image();
+      im.onload=()=>{
+        let {width:w,height:h}=im;
+        if(w>max||h>max){ const k=max/Math.max(w,h); w=Math.round(w*k); h=Math.round(h*k); }
+        const c=document.createElement("canvas"); c.width=w; c.height=h;
+        c.getContext("2d").drawImage(im,0,0,w,h);
+        res(c.toDataURL("image/jpeg",calidad));
+      };
+      im.onerror=()=>rej(new Error("No se pudo leer la imagen"));
+      im.src=fr.result; };
+    fr.onerror=()=>rej(new Error("No se pudo abrir el archivo"));
+    fr.readAsDataURL(file);
+  });
+}
+async function guardarFoto(clave,dataUrl){
+  await setDoc(doc(db,COL_FOTOS,idDoc(clave)),{img:dataUrl,act:new Date().toISOString()});
+  cacheFotos.set(clave,dataUrl);
+  const it=porClave.get(clave); if(it) it.foto=true;
+}
+
+/* ============ MODO MOSTRADOR ============ */
+async function mostrador(clave){
+  const i=porClave.get(clave); if(!i) return;
+  const hay=(i.exist||0)>0;
+  const precio = (i.p1&&i.p1>0) ? pesos(conIva(i.p1)) : null;
+  abrirModal(`<div class="mostrador">
+      <div class="m-foto" id="m-foto"><div class="m-cargando">Cargando foto…</div></div>
+      <div class="m-desc">${esc(i.desc||"")}</div>
+      <div class="m-precio">${precio? precio+'<small>IVA incluido</small>' : '<span class="sin-precio">Consultar en caja</span>'}</div>
+      <div class="m-disp ${hay?'si':'no'}">${hay?"Disponible":"Sin existencia"}</div>
+      <div class="acciones">
+        <button class="btn sec" data-cerrar>Cerrar</button>
+        <button class="btn" id="wa">Enviar por WhatsApp</button>
+      </div>
+      <button class="btn sec" id="camb-foto" style="margin-top:8px">Tomar o cambiar foto</button>
+    </div>`);
+  const cont=$("#m-foto");
+  const img=await fotoDe(clave);
+  cont.innerHTML = img
+    ? `<img src="${img}" alt="${esc(i.desc||"")}">`
+    : `<div class="m-sinfoto"><div>Sin foto</div><small>Tómala con el botón de abajo</small></div>`;
+  $("#wa").onclick=()=>compartir(i,img);
+  $("#camb-foto").onclick=async ()=>{
+    if(!esAdmin && !(await pedirClave())) return;
+    const inp=document.createElement("input");
+    inp.type="file"; inp.accept="image/*"; inp.capture="environment";
+    inp.onchange=async ()=>{
+      if(!inp.files[0]) return;
+      cont.innerHTML=`<div class="m-cargando">Guardando…</div>`;
+      try{
+        const d=await comprimir(inp.files[0]);
+        await guardarFoto(clave,d);
+        cont.innerHTML=`<img src="${d}" alt="">`;
+      }catch(e){ cont.innerHTML=`<div class="m-sinfoto"><div>No se guardó</div><small>${esc(e.message)}</small></div>`; }
+    };
+    inp.click();
+  };
+}
+
+/* ============ COMPARTIR ============ */
+async function compartir(i,img){
+  const precio=(i.p1&&i.p1>0)? `\nPrecio: ${pesos(conIva(i.p1))} (IVA incluido)` : "";
+  const texto=`${i.desc}\nClave: ${i.clave}${precio}\n${(i.exist||0)>0?"Disponible":"Sobre pedido"}\n\nMoto Pro`;
+  if(img && navigator.canShare){
+    try{
+      const blob=await (await fetch(img)).blob();
+      const archivo=new File([blob],`${i.clave}.jpg`,{type:"image/jpeg"});
+      if(navigator.canShare({files:[archivo]})){
+        await navigator.share({files:[archivo],text:texto}); return;
+      }
+    }catch(e){ if(e.name==="AbortError") return; }
+  }
+  window.open("https://wa.me/?text="+encodeURIComponent(texto),"_blank");
 }
 
 /* ============ EDITAR UBICACIÓN ============ */
@@ -457,6 +591,12 @@ async function editar(clave){
   abrirModal(`
     <h2>${esc(i.clave)}</h2>
     <p class="sub-t">${esc(i.desc||"")}</p>
+    <div class="precios-int">
+      <div><span>Mostrador</span><b>${i.p1>0?pesos(conIva(i.p1)):"—"}</b><small>${i.p1>0?pesos(i.p1)+" + IVA":"sin precio"}</small></div>
+      <div><span>Lista 2</span><b>${i.p2>0?pesos(conIva(i.p2)):"—"}</b><small>${i.p2>0?pesos(i.p2)+" + IVA":""}</small></div>
+      <div><span>Lista 3</span><b>${i.p3>0?pesos(conIva(i.p3)):"—"}</b><small>${i.p3>0?pesos(i.p3)+" + IVA":""}</small></div>
+    </div>
+    <p class="nota-precio">Los precios se actualizan solo desde SAIT. Última carga: ${esc((i.act||"").slice(0,10)||"—")}</p>
     <label class="lbl">Ubicación principal</label>
     <div class="grid3">
       <select id="e1">${opciones(MUEBLES,i.u1)}</select>
@@ -560,17 +700,25 @@ $("#archivo").onchange = async e=>{
           iE=cab.findIndex(c=>c.startsWith("EXISTENCIA SISTEMA"))>=0?cab.findIndex(c=>c.startsWith("EXISTENCIA SISTEMA")):cab.findIndex(c=>c.startsWith("EXISTENCIA")),
           iU1=cab.findIndex(c=>c==="UBICACION 1"), iU2=cab.findIndex(c=>c==="UBICACION 2"),
           iU3=cab.findIndex(c=>c==="UBICACION 3"), iO=cab.findIndex(c=>c.startsWith("OBSERVACION")),
-          iCB=cab.findIndex(c=>c.includes("BARRA")||c==="CODIGO");
-    const traeUbic = iU1>=0;
-    filasImport=[];
+          iCB=cab.findIndex(c=>c.includes("BARRA")||c==="CODIGO"),
+          iP1=cab.findIndex(c=>c==="PRECIO 1"), iP2=cab.findIndex(c=>c==="PRECIO 2"),
+          iP3=cab.findIndex(c=>c==="PRECIO 3");
+    const traeUbic = iU1>=0, traePrecio = iP1>=0;
+    filasImport=[]; let corregidas=0;
     for(let r=hi+1;r<bruto.length;r++){
-      const f2=bruto[r]||[]; const clave=String(f2[iC]??"").trim();
+      const f2=bruto[r]||[]; let clave=String(f2[iC]??"").trim();
       if(!clave || clave.toUpperCase()==="NAN") continue;
+      if(CLAVES_CORREGIDAS[clave]){ clave=CLAVES_CORREGIDAS[clave]; corregidas++; }
       const o={ clave,
         desc: iD>=0? String(f2[iD]??"").trim() : "",
         exist: iE>=0? (Number(f2[iE])||0) : null,
         cb: iCB>=0? String(f2[iCB]??"").trim() : "",
         obs: iO>=0? String(f2[iO]??"").trim() : "" };
+      if(traePrecio){
+        o.p1=Number(f2[iP1])||0;
+        o.p2=iP2>=0?(Number(f2[iP2])||0):0;
+        o.p3=iP3>=0?(Number(f2[iP3])||0):0;
+      }
       if(traeUbic){
         const u=partirUbic(f2[iU1],f2[iU2],f2[iU3]);
         Object.assign(o,{u1:u.u1,u2:u.u2,u3:u.u3,b1:u.b1,b2:u.b2,b3:u.b3});
@@ -579,10 +727,14 @@ $("#archivo").onchange = async e=>{
       filasImport.push(o);
     }
     const nuevas = filasImport.filter(x=>!porClave.has(x.clave));
+    const sinPrecio = traePrecio ? filasImport.filter(x=>!x.p1||x.p1<=0).length : 0;
     $("#prev-import").innerHTML = `<div class="aviso bien">
       <b>${filasImport.length} filas leídas.</b><br>
       ${nuevas.length} claves nuevas · ${filasImport.length-nuevas.length} ya en el catálogo<br>
-      ${traeUbic?"El archivo trae columnas de ubicación: se actualizarán.":"Sin columnas de ubicación: solo se actualizan descripción y existencias."}
+      ${traeUbic?"Trae ubicaciones: se actualizarán.":""}
+      ${traePrecio?`Trae precios: se actualizarán (${sinPrecio} sin Precio 1).`:""}
+      ${!traeUbic&&!traePrecio?"Solo descripción y existencias.":""}
+      ${corregidas?`<br>${corregidas} clave(s) corregida(s) por daño de Excel.`:""}
     </div>`;
     $("#btn-import").disabled=false;
   }catch(err){
@@ -608,6 +760,7 @@ $("#btn-import").onclick = async ()=>{
         if(x.exist!==null) d.exist=x.exist;
         if(x.cb) d.cb=x.cb;
         if(x.obs) d.obs=x.obs;
+        if("p1" in x){ d.p1=x.p1; d.p2=x.p2; d.p3=x.p3; }
         if("u1" in x){ d.u1=x.u1; d.u2=x.u2; d.u3=x.u3; d.b1=x.b1; d.b2=x.b2; d.b3=x.b3; }
         else if(!prev){ d.u1=""; d.u2=""; d.u3=""; }
         lote.set(doc(db,COLECCION,idDoc(x.clave)), d, {merge:true});
@@ -629,6 +782,8 @@ $("#btn-import").onclick = async ()=>{
 $("#btn-export").onclick = ()=>{
   const filas = [...ITEMS].sort((a,b)=>a.clave.localeCompare(b.clave)).map(i=>({
     Clave:i.clave, Descripcion:i.desc||"", Existencia:i.exist??0,
+    "Precio 1":i.p1||0, "Precio 1 c/IVA": i.p1? +conIva(i.p1).toFixed(2):0,
+    "Precio 2":i.p2||0, "Precio 3":i.p3||0,
     "Ubicacion 1":i.u1||"", "Ubicacion 2":i.u2||"", "Ubicacion 3":i.u3||"",
     "Alt 1":i.b1||"", "Alt 2":i.b2||"", "Alt 3":i.b3||"",
     "Codigo barras":i.cb||"", Observaciones:i.obs||"", Actualizado:i.act||""
