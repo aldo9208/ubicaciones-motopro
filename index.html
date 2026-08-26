@@ -182,11 +182,20 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .aviso.malo{background:#FDECEA;border-left-color:var(--rojo)}
 .aviso.bien{background:#E6F4EE;border-left-color:var(--verde)}
 #lector{width:100%;border-radius:var(--r);overflow:hidden}
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,16px);z-index:90;
+  max-width:min(460px,92vw);background:var(--tinta);color:#fff;padding:13px 16px;border-radius:8px;
+  font-size:13.5px;line-height:1.4;box-shadow:0 6px 24px rgba(0,0,0,.28);opacity:0;transition:opacity .25s,transform .25s}
+.toast.ver{opacity:1;transform:translate(-50%,0)}
+.toast.bien{background:var(--verde)}
+@media(prefers-reduced-motion:reduce){.toast{transition:none}}
 .cargando{text-align:center;padding:60px 20px;color:var(--tinta-2);font-family:Oswald;letter-spacing:.08em;text-transform:uppercase}
 .filtros{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;scrollbar-width:none}
 .filtros::-webkit-scrollbar{display:none}
 .chip{border:1px solid var(--linea);background:var(--superficie);border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;white-space:nowrap}
 .chip.on{background:var(--tinta);color:#fff;border-color:var(--tinta)}
+.chip.tipo{font-family:Oswald;letter-spacing:.05em;font-size:12px}
+.chip.tipo b{font-family:'JetBrains Mono';font-size:10px;opacity:.6;margin-left:3px}
+#tipos{margin-top:-4px}
 @media(prefers-reduced-motion:no-preference){.ficha{animation:sube .18s ease both}}
 @keyframes sube{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 </style>
@@ -222,6 +231,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <button class="chip" data-f="conex">Con existencia</button>
     <button class="chip" data-f="sinub">Sin ubicar</button>
   </div>
+  <div class="filtros" id="tipos"></div>
   <div id="resumen-b" class="resumen"></div>
   <div class="lista" id="res"></div>
 </div>
@@ -329,6 +339,36 @@ function partirUbic(u1,u2,u3){
   };
 }
 
+/* ============ ÍNDICE DE BÚSQUEDA ============
+   Resuelve tres cosas que hoy hacen fallar la búsqueda:
+   1. El mismo modelo se escribe FT-150, FT 150 y FT150 en SAIT.
+   2. SAIT exporta la Ñ, Ü y Ó corrompidas (CIG▄EÐAL en vez de CIGÜEÑAL).
+   3. La misma pieza tiene dos nombres (SPROCKET / ENGRANE / CATALINA).      */
+const MOJIBAKE = {"Ð":"N","▄":"U","Ë":"O","¾":"O"};
+const SINONIMOS = {
+  BALATA:["ZAPATA"], SPROCKET:["ENGRANE","CATALINA","CORONA"],
+  ESPEJO:["RETROVISOR"], CALAVERA:["STOP"], DIRECCIONAL:["INTERMITENTE"],
+  LLANTA:["NEUMATICO"], MANIJA:["PALANCA"], CAMARA:["TRIPA"],
+  AMORTIGUADOR:["SUSPENSION"], FARO:["LUZ DELANTERA"]
+};
+function normTexto(s){
+  s = String(s||"");
+  for(const [a,b] of Object.entries(MOJIBAKE)){ if(a) s = s.split(a).join(b); }
+  s = sinAcentos(s).toUpperCase();
+  return s.replace(/[^A-Z0-9]+/g," ").replace(/\s+/g," ").trim();
+}
+const colapsar = s => s.replace(/[^A-Z0-9]/g,"");
+function construirIndice(i){
+  const n = normTexto(i.clave+" "+(i.desc||"")+" "+(i.cb||""));
+  let ext = n;
+  for(const [k,vs] of Object.entries(SINONIMOS)){
+    if(n.includes(k)) ext += " "+vs.join(" ");
+    for(const v of vs) if(n.includes(v)) ext += " "+k;
+  }
+  i._busca = n+" | "+colapsar(n)+" | "+colapsar(ext);
+}
+const coincide = (i,t) => i._busca.includes(t) || i._busca.includes(colapsar(t));
+
 /* ============ ESTADO ============ */
 let db, ITEMS=[], porClave=new Map(), esAdmin=false, filtro="todo", pestana="buscar";
 let filasImport=null;
@@ -357,7 +397,8 @@ async function recargar(){
     const snap = await getDocs(collection(db, COLECCION));
     ITEMS = snap.docs.map(d=>d.data());
     porClave = new Map(ITEMS.map(i=>[i.clave,i]));
-    ITEMS.forEach(i=> i._busca = sinAcentos((i.clave+" "+(i.desc||"")+" "+(i.cb||""))).toUpperCase());
+    ITEMS.forEach(construirIndice);
+    pintarTipos();
     estado(snap.metadata.fromCache?"Sin conexión":"En línea", snap.metadata.fromCache?"":"ok");
     pintar();
   }catch(e){
@@ -385,6 +426,24 @@ const tieneUbic = i => !!(i.u1);
 const pendientes = () => ITEMS.filter(i=>!tieneUbic(i) && (i.exist||0)>0)
                              .sort((a,b)=>(b.exist||0)-(a.exist||0));
 
+/* Accesos rápidos: las familias de pieza más numerosas del catálogo */
+function pintarTipos(){
+  const c=new Map();
+  ITEMS.forEach(i=>{
+    const p=normTexto(i.desc||"").split(" ")[0];
+    if(p && p.length>2 && !/^\d/.test(p)) c.set(p,(c.get(p)||0)+1);
+  });
+  const top=[...c.entries()].sort((a,b)=>b[1]-a[1]).slice(0,14);
+  $("#tipos").innerHTML = top.map(([p,n])=>
+    `<button class="chip tipo" data-tipo="${esc(p)}">${esc(p)} <b>${n}</b></button>`).join("");
+  $$("[data-tipo]").forEach(b=>b.onclick=()=>{
+    const ya = normTexto($("#q").value)===b.dataset.tipo;
+    $("#q").value = ya ? "" : b.dataset.tipo;
+    $$(".chip.tipo").forEach(x=>x.classList.toggle("on", !ya && x===b));
+    pintarBuscar();
+  });
+}
+
 function pintar(){
   $("#n-pend").textContent = pendientes().length;
   if(pestana==="buscar") pintarBuscar();
@@ -393,12 +452,12 @@ function pintar(){
 }
 
 function pintarBuscar(){
-  const q = sinAcentos($("#q").value).toUpperCase().trim();
+  const q = normTexto($("#q").value);
   const terminos = q.split(/\s+/).filter(Boolean);
   let r = ITEMS;
   if(filtro==="conex") r = r.filter(i=>(i.exist||0)>0);
   if(filtro==="sinub") r = r.filter(i=>!tieneUbic(i));
-  if(terminos.length) r = r.filter(i=>terminos.every(t=>i._busca.includes(t)));
+  if(terminos.length) r = r.filter(i=>terminos.every(t=>coincide(i,t)));
   else if(filtro==="todo"){
     $("#resumen-b").textContent = `${ITEMS.length} claves en el catálogo · ${ITEMS.filter(tieneUbic).length} ubicadas`;
     $("#res").innerHTML = `<div class="vacio-msg"><div class="grande">Busca una refacción</div>Escribe la clave o parte de la descripción, o escanea el código de barras.</div>`;
@@ -409,6 +468,7 @@ function pintarBuscar(){
     if(ea!==eb) return ea?-1:1;
     return a.clave.localeCompare(b.clave);
   });
+  $$(".chip.tipo").forEach(x=>x.classList.toggle("on", x.dataset.tipo===q));
   $("#resumen-b").textContent = `${r.length} resultado${r.length===1?"":"s"}`;
   $("#res").innerHTML = r.length ? r.slice(0,250).map(ficha).join("")
     : `<div class="vacio-msg"><div class="grande">Sin resultados</div>Prueba con menos palabras o parte de la clave.</div>`;
@@ -547,6 +607,7 @@ async function mostrador(clave){
   cont.innerHTML = img
     ? `<img src="${img}" alt="${esc(i.desc||"")}">`
     : `<div class="m-sinfoto"><div>Sin foto</div><small>Tómala con el botón de abajo</small></div>`;
+  $("#wa").textContent = img ? "Enviar con foto" : "Enviar solo texto";
   $("#wa").onclick=()=>compartir(i,img);
   $("#camb-foto").onclick=async ()=>{
     if(!esAdmin && !(await pedirClave())) return;
@@ -559,26 +620,73 @@ async function mostrador(clave){
         const d=await comprimir(inp.files[0]);
         await guardarFoto(clave,d);
         cont.innerHTML=`<img src="${d}" alt="">`;
+        $("#wa").textContent="Enviar con foto";
+        $("#wa").onclick=()=>compartir(i,d);
       }catch(e){ cont.innerHTML=`<div class="m-sinfoto"><div>No se guardó</div><small>${esc(e.message)}</small></div>`; }
     };
     inp.click();
   };
 }
 
-/* ============ COMPARTIR ============ */
+/* ============ COMPARTIR ============
+   WhatsApp por enlace (wa.me) solo acepta texto. Para mandar la foto hay
+   dos caminos, según el equipo:
+     Celular    -> hoja de compartir del sistema, foto y texto juntos.
+     Escritorio -> se copia la foto al portapapeles y se pega con Ctrl+V.  */
+function aPng(dataUrl){
+  return new Promise((res,rej)=>{
+    const im=new Image();
+    im.onload=()=>{ const c=document.createElement("canvas");
+      c.width=im.width; c.height=im.height;
+      c.getContext("2d").drawImage(im,0,0);
+      c.toBlob(b=> b?res(b):rej(new Error("no se pudo convertir")),"image/png"); };
+    im.onerror=()=>rej(new Error("no se pudo leer la foto"));
+    im.src=dataUrl;
+  });
+}
+function aviso(msg,tipo){
+  const t=document.createElement("div");
+  t.className="toast "+(tipo||"");
+  t.textContent=msg; document.body.appendChild(t);
+  setTimeout(()=>t.classList.add("ver"),10);
+  setTimeout(()=>{ t.classList.remove("ver"); setTimeout(()=>t.remove(),300); },5200);
+}
+const enlaceWA = t => "https://wa.me/?text="+encodeURIComponent(t);
+
 async function compartir(i,img){
   const precio=(i.p1&&i.p1>0)? `\nPrecio: ${pesos(conIva(i.p1))} (IVA incluido)` : "";
   const texto=`${i.desc}\nClave: ${i.clave}${precio}\n${(i.exist||0)>0?"Disponible":"Sobre pedido"}\n\nMoto Pro`;
-  if(img && navigator.canShare){
+
+  if(!img){
+    window.open(enlaceWA(texto),"_blank");
+    aviso("Este artículo no tiene foto todavía. Tómala con el botón de abajo y la próxima vez se manda junto.");
+    return;
+  }
+  // 1) Celular: hoja de compartir del sistema, con archivo
+  if(navigator.canShare){
     try{
       const blob=await (await fetch(img)).blob();
       const archivo=new File([blob],`${i.clave}.jpg`,{type:"image/jpeg"});
       if(navigator.canShare({files:[archivo]})){
-        await navigator.share({files:[archivo],text:texto}); return;
+        await navigator.share({files:[archivo],text:texto});
+        return;
       }
     }catch(e){ if(e.name==="AbortError") return; }
   }
-  window.open("https://wa.me/?text="+encodeURIComponent(texto),"_blank");
+  // 2) Escritorio: copiar la foto y abrir WhatsApp para pegarla
+  if(navigator.clipboard && window.ClipboardItem){
+    try{
+      await navigator.clipboard.write([new ClipboardItem({"image/png": aPng(img)})]);
+      window.open(enlaceWA(texto),"_blank");
+      aviso("Foto copiada. En WhatsApp pega con Ctrl+V y envíala junto con el texto.","bien");
+      return;
+    }catch(e){ /* sigue al plan 3 */ }
+  }
+  // 3) Último recurso: descargar la foto para adjuntarla a mano
+  const a=document.createElement("a");
+  a.href=img; a.download=`${i.clave}.jpg`; a.click();
+  window.open(enlaceWA(texto),"_blank");
+  aviso("La foto se descargó. Adjúntala a mano en WhatsApp.");
 }
 
 /* ============ EDITAR UBICACIÓN ============ */
@@ -628,7 +736,7 @@ async function editar(clave){
     try{
       await setDoc(doc(db,COLECCION,idDoc(clave)), d, {merge:true});
       Object.assign(i,d);
-      i._busca = sinAcentos((i.clave+" "+(i.desc||"")+" "+(i.cb||""))).toUpperCase();
+      construirIndice(i);
       cerrarModal(); pintar();
     }catch(e){ b.disabled=false; b.textContent="Guardar";
       alert("No se pudo guardar: "+e.message); }
