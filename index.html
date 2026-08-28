@@ -225,6 +225,25 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .notas{margin-top:6px;font-size:12.5px;font-style:italic;color:var(--tinta-2)}
 .sec-tit.rojo{color:var(--rojo);border-bottom-color:var(--rojo)}
 .sec-tit.verde{color:var(--verde);border-bottom-color:var(--verde)}
+.sel-item{display:block;width:100%;text-align:left;background:var(--superficie);border:1px solid var(--linea);
+  border-left:4px solid var(--azul);border-radius:var(--r);padding:10px 12px;margin-bottom:7px}
+.sel-item:active{background:var(--azul-claro)}
+.sel-item .clave{display:block}
+.sel-item .desc{display:block;margin:2px 0 3px}
+.folio{font-family:'JetBrains Mono';font-size:13px;font-weight:700;color:var(--azul);letter-spacing:.04em}
+.cuenta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0 4px}
+.cuenta>div{background:var(--superficie);border:1px solid var(--linea);border-radius:4px;padding:9px;text-align:center}
+.cuenta span{display:block;font-family:Oswald;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--tinta-2)}
+.cuenta b{display:block;font-family:Oswald;font-size:18px;margin-top:2px}
+.cuenta .debe{border-color:var(--rojo);background:#FDECEA}
+.cuenta .debe b{color:var(--rojo)}
+.cuenta .pagado{border-color:var(--verde);background:#E6F4EE}
+.cuenta .pagado b{color:var(--verde)}
+.abonos{background:var(--superficie);border:1px solid var(--linea);border-radius:4px;padding:4px 11px}
+.abono{display:flex;align-items:baseline;gap:8px;padding:7px 0;border-bottom:1px solid var(--concreto);font-size:13px}
+.abono:last-child{border-bottom:0}
+.abono .f{margin-left:auto;font-size:11px;color:var(--tinta-2)}
+.abono b{font-family:'JetBrains Mono';font-size:13px;min-width:72px;text-align:right}
 @media(prefers-reduced-motion:reduce){.toast{transition:none}}
 .cargando{text-align:center;padding:60px 20px;color:var(--tinta-2);font-family:Oswald;letter-spacing:.08em;text-transform:uppercase}
 .filtros{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;scrollbar-width:none}
@@ -290,6 +309,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 
 <!-- APARTADOS -->
 <div class="panel oculto" id="p-apartados">
+  <button class="btn" id="nuevo-apa" style="margin-bottom:14px">+ Nuevo apartado o pedido</button>
   <div class="resumen" id="resumen-a"></div>
   <div id="lista-apartados"><div class="cargando">Cargando…</div></div>
   <button class="btn sec" id="exp-apartados" style="margin-top:14px">Descargar Excel</button>
@@ -594,7 +614,8 @@ function telWA(t){                      // deja el número listo para wa.me
   if(d.length===13 && d.startsWith("521")) return "52"+d.slice(3);
   return d;
 }
-const yaLlego = r => r.clave && (porClave.get(r.clave)?.exist||0)>0;
+/* Un pedido sin clave no está en SAIT, así que su llegada se marca a mano */
+const yaLlego = r => r.llego===true || (r.clave && (porClave.get(r.clave)?.exist||0)>0);
 
 function esperando(){
   return (NEGADAS||[]).filter(r=>r.tel && !r.avisado)
@@ -639,6 +660,16 @@ const DIAS_APARTADO = 30;
 let APARTADOS=null;
 
 const hoyISO = () => new Date().toISOString();
+/* Folio corto para la nota de papel: A-260828-01 (apartado) / P-... (pedido) */
+function nuevoFolio(tipo){
+  const d=new Date(), y=String(d.getFullYear()).slice(2),
+        m=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0");
+  const base=`${tipo==="pedido"?"P":"A"}-${y}${m}${dd}`;
+  const n=(APARTADOS||[]).filter(a=>(a.folio||"").startsWith(base)).length+1;
+  return `${base}-${String(n).padStart(2,"0")}`;
+}
+const abonado = a => (a.abonos||[]).reduce((s,x)=>s+(x.monto||0), 0);
+const saldoDe = a => Math.max(0,(a.total||0)-abonado(a));
 const masDias = n => new Date(Date.now()+n*864e5).toISOString();
 const diasPara = f => Math.ceil((new Date(f)-Date.now())/864e5);
 
@@ -658,16 +689,50 @@ function reservadas(clave){
 }
 const disponible = i => Math.max(0,(i.exist||0)-reservadas(i.clave));
 
-async function nuevoApartado(clave){
+/* Selector de pieza: permite arrancar un apartado desde la propia pestaña,
+   sin tener que ir a buscar la refacción primero.                          */
+function elegirPieza(){
+  abrirModal(`<h2>¿Qué pieza?</h2>
+    <p class="sub-t">Busca por clave o descripción.</p>
+    <input type="text" id="sel-q" placeholder="Ej. balatas ybr125" autocomplete="off" style="margin-top:10px">
+    <div id="sel-res" class="lista" style="margin-top:12px"></div>
+    <button class="btn sec" id="sel-libre" style="margin-top:10px">No está en el catálogo — escribirlo a mano</button>
+    <div class="acciones"><button class="btn sec" data-cerrar>Cancelar</button></div>`);
+  $("#sel-libre").onclick=()=>{
+    const t=$("#sel-q").value.trim();
+    if(!t){ aviso("Escribe primero qué pieza pide el cliente."); $("#sel-q").focus(); return; }
+    cerrarModal(); nuevoApartado(null,t);
+  };
+  const pintarSel=()=>{
+    const ts=normTexto($("#sel-q").value).split(" ").filter(Boolean);
+    if(!ts.length){ $("#sel-res").innerHTML=""; return; }
+    const r=ITEMS.filter(i=>ts.every(t=>coincide(i,t)))
+                 .sort((a,b)=>disponible(b)-disponible(a)).slice(0,8);
+    $("#sel-res").innerHTML = r.length? r.map(i=>`
+      <button class="sel-item" data-pick="${esc(i.clave)}">
+        <span class="clave">${esc(i.clave)}</span>
+        <span class="desc">${esc(i.desc||"")}</span>
+        <span class="mini-dato">${disponible(i)} disponible(s)${i.p1>0?" · "+pesos(conIva(i.p1)):""}</span>
+      </button>`).join("")
+      : `<div class="mini-dato" style="padding:10px 2px">Sin resultados.</div>`;
+    $$("[data-pick]").forEach(b=>b.onclick=()=>{ const c=b.dataset.pick; cerrarModal(); nuevoApartado(c); });
+  };
+  let t2; $("#sel-q").addEventListener("input",()=>{clearTimeout(t2);t2=setTimeout(pintarSel,110)});
+  $("#sel-q").focus();
+}
+
+async function nuevoApartado(clave, libre){
   if(!esAdmin && !(await pedirClave())) return;
-  const i=porClave.get(clave); if(!i) return;
-  const hay=disponible(i)>0;
-  const punit=i.p1>0?+conIva(i.p1).toFixed(2):0;
+  const i = clave? porClave.get(clave) : null;
+  if(clave && !i) return;
+  const hay = i? disponible(i)>0 : false;          // sin clave siempre es pedido
+  const punit = i && i.p1>0 ? +conIva(i.p1).toFixed(2) : 0;
+  const desc = i? (i.desc||"") : (libre||"");
   abrirModal(`
     <h2>${hay?"Apartar pieza":"Pedido sobre encargo"}</h2>
-    <p class="sub-t">${esc(i.desc||"")}</p>
+    <p class="sub-t">${esc(desc)}${clave?"":" · no está en el catálogo"}</p>
     <div class="tipos">
-      <button class="tipo-b ${hay?'on':''}" data-tipo="apartado" ${hay?"":"disabled"}>Apartado<small>${disponible(i)} disponibles</small></button>
+      <button class="tipo-b ${hay?'on':''}" data-tipo="apartado" ${hay?"":"disabled"}>Apartado<small>${i?disponible(i)+" disponibles":"sin existencia"}</small></button>
       <button class="tipo-b ${hay?'':'on'}" data-tipo="pedido">Pedido<small>se encarga</small></button>
     </div>
     <label class="lbl">Cantidad</label>
@@ -701,25 +766,144 @@ async function nuevoApartado(clave){
   $("#a-total").oninput=recalc; $("#a-abono").oninput=recalc; recalc();
 
   $("#g-apa").onclick=async ()=>{
-    if(tipo==="apartado" && cant>disponible(i)){
+    if(tipo==="apartado" && i && cant>disponible(i)){
       aviso(`Solo hay ${disponible(i)} disponible(s). Ajusta la cantidad.`); return;
     }
     const b=$("#g-apa"); b.disabled=true; b.textContent="Guardando…";
     ultimoQuien=$("#a-quien").value.trim();
     const id=`${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-    const reg={ id, tipo, clave, desc:i.desc||"", cant,
-      total:+$("#a-total").value||0, abonado:+$("#a-abono").value||0,
+    const ant=+$("#a-abono").value||0;
+    const reg={ id, folio:nuevoFolio(tipo), tipo, clave:clave||"", desc, cant,
+      total:+$("#a-total").value||0,
+      abonos: ant>0? [{fecha:hoyISO(), monto:ant, quien:ultimoQuien}] : [],
       cliente:$("#a-nom").value.trim(), tel:soloDigitos($("#a-tel").value),
       quien:ultimoQuien, notas:$("#a-notas").value.trim(),
-      estado:"activo", fecha:hoyISO(),
+      estado:"activo", llego:false, fecha:hoyISO(),
       vence: tipo==="apartado"? masDias(DIAS_APARTADO) : "" };
     try{
       await setDoc(doc(db,COL_APARTADOS,id),reg);
       (APARTADOS=APARTADOS||[]).push(reg);
       cerrarModal(); pintar();
-      aviso(tipo==="apartado"?`Apartado registrado. Vence en ${DIAS_APARTADO} días.`:"Pedido registrado.","bien");
+      verApartado(reg.id);
+      aviso(`Folio ${reg.folio} registrado.`,"bien");
     }catch(e){ b.disabled=false; b.textContent="Registrar"; alert("No se pudo guardar: "+e.message); }
   };
+}
+
+/* ============ FICHA DEL APARTADO ============
+   Es el equivalente digital de la nota de papel: folio, pieza, lo que ha
+   abonado y lo que debe. Aquí se anotan los abonos parciales.            */
+function verApartado(id){
+  const a=(APARTADOS||[]).find(x=>x.id===id); if(!a) return;
+  const saldo=saldoDe(a), llego=yaLlego(a);
+  const d=a.vence?diasPara(a.vence):null;
+  abrirModal(`
+    <div class="folio">${esc(a.folio||"")}</div>
+    <h2>${esc(a.cliente||"Sin nombre")}</h2>
+    <p class="sub-t">${a.cant} pz · ${esc(a.desc||"")}</p>
+    ${a.tel?`<p class="sub-t">${esc(a.tel)}</p>`:""}
+
+    <div class="cuenta">
+      <div><span>Total</span><b>${pesos(a.total)}</b></div>
+      <div><span>Abonado</span><b>${pesos(abonado(a))}</b></div>
+      <div class="${saldo>0?'debe':'pagado'}"><span>Saldo</span><b>${pesos(saldo)}</b></div>
+    </div>
+
+    <label class="lbl">Abonos</label>
+    ${(a.abonos||[]).length? `<div class="abonos">${a.abonos.map((x,k)=>`
+        <div class="abono"><span>${k===0?"Anticipo":"Abono "+(k+1)}</span>
+          <span class="f">${esc((x.fecha||"").slice(0,10))}${x.quien?" · "+esc(x.quien):""}</span>
+          <b>${pesos(x.monto)}</b></div>`).join("")}</div>`
+      : `<div class="mini-dato">Sin abonos registrados.</div>`}
+    ${a.estado==="activo"&&saldo>0?`
+      <div class="grid2" style="margin-top:10px">
+        <input type="number" id="ab-monto" placeholder="Monto" step="0.01" inputmode="decimal">
+        <button class="btn" id="ab-add">Registrar abono</button>
+      </div>`:""}
+
+    <div class="mini-dato" style="margin-top:14px">
+      ${a.tipo==="apartado"
+        ? (d<0?`Venció hace ${-d} día(s)`:`Vence el ${(a.vence||"").slice(0,10)} — ${d} día(s)`)
+        : (llego?"Ya llegó al almacén":"Esperando al proveedor")}
+      ${a.quien?` · tomó ${esc(a.quien)}`:""}
+    </div>
+    ${a.notas?`<div class="notas">${esc(a.notas)}</div>`:""}
+
+    <div class="acciones" style="flex-wrap:wrap">
+      ${a.tel?`<button class="btn sec" id="ap-wa">Mandar nota</button>`:""}
+      <button class="btn sec" id="ap-print">Imprimir</button>
+    </div>
+    ${a.estado==="activo"?`
+      <div class="acciones">
+        ${a.tipo==="pedido"&&!a.clave&&!a.llego?`<button class="btn sec" id="ap-llego">Ya llegó</button>`:""}
+        <button class="btn sec" id="ap-canc" style="color:var(--rojo);border-color:var(--rojo)">Cancelar</button>
+        <button class="btn" id="ap-ent">Entregar</button>
+      </div>`:`<div class="aviso">Este registro está ${esc(a.estado)}.</div>`}
+    <div class="acciones"><button class="btn sec" data-cerrar>Cerrar</button></div>`);
+
+  if($("#ab-add")) $("#ab-add").onclick=()=>agregarAbono(a);
+  if($("#ap-wa")) $("#ap-wa").onclick=()=>mandarNota(a);
+  $("#ap-print").onclick=()=>imprimirNota(a);
+  if($("#ap-llego")) $("#ap-llego").onclick=async ()=>{
+    try{ await setDoc(doc(db,COL_APARTADOS,a.id),{llego:true},{merge:true});
+      a.llego=true; verApartado(id); aviso("Marcado como llegado. Avísale al cliente.","bien");
+    }catch(e){ aviso("No se pudo actualizar."); } };
+  if($("#ap-ent")) $("#ap-ent").onclick=()=>{ cerrarModal(); cerrarApartado(a.id,"entregado"); };
+  if($("#ap-canc")) $("#ap-canc").onclick=()=>{ cerrarModal(); cerrarApartado(a.id,"cancelado"); };
+}
+
+async function agregarAbono(a){
+  const monto=+$("#ab-monto").value||0;
+  if(monto<=0){ aviso("Escribe el monto del abono."); return; }
+  if(monto>saldoDe(a)+0.01){ aviso(`El saldo es ${pesos(saldoDe(a))}. No puede abonar de más.`); return; }
+  const b=$("#ab-add"); b.disabled=true; b.textContent="Guardando…";
+  const abonos=[...(a.abonos||[]),{fecha:hoyISO(),monto,quien:ultimoQuien}];
+  try{
+    await setDoc(doc(db,COL_APARTADOS,a.id),{abonos},{merge:true});
+    a.abonos=abonos; verApartado(a.id);
+    aviso(`Abono de ${pesos(monto)} registrado. Saldo: ${pesos(saldoDe(a))}`,"bien");
+  }catch(e){ b.disabled=false; b.textContent="Registrar abono"; aviso("No se pudo guardar el abono."); }
+}
+
+function textoNota(a){
+  const l=[`MOTO PRO — Nota ${a.folio}`,``,
+    `${a.cant} pz · ${a.desc}`,
+    `Total: ${pesos(a.total)}`];
+  (a.abonos||[]).forEach((x,k)=>l.push(`${k===0?"Anticipo":"Abono "+(k+1)} ${(x.fecha||"").slice(0,10)}: ${pesos(x.monto)}`));
+  l.push(`Saldo pendiente: ${pesos(saldoDe(a))}`);
+  if(a.tipo==="apartado"&&a.vence) l.push(``,`Lo guardamos hasta el ${(a.vence||"").slice(0,10)}.`);
+  else l.push(``,`Le avisamos en cuanto llegue.`);
+  return l.join("\n");
+}
+function mandarNota(a){
+  window.open(`https://wa.me/${telWA(a.tel)}?text=${encodeURIComponent(textoNota(a))}`,"_blank");
+}
+function imprimirNota(a){
+  const w=window.open("","_blank","width=420,height=640");
+  if(!w){ aviso("El navegador bloqueó la ventana de impresión."); return; }
+  w.document.write(`<html><head><title>Nota ${esc(a.folio)}</title><style>
+    body{font-family:system-ui,sans-serif;padding:18px;font-size:13px;color:#000}
+    h1{font-size:17px;margin:0;letter-spacing:.08em}
+    .f{font-family:monospace;font-size:20px;font-weight:700;margin:6px 0 14px}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    td{padding:4px 0;border-bottom:1px dotted #bbb}
+    td.r{text-align:right;font-variant-numeric:tabular-nums}
+    .tot{font-weight:700;font-size:15px;border-top:2px solid #000}
+    .pie{margin-top:22px;font-size:11px;color:#555}
+    </style></head><body>
+    <h1>MOTO PRO</h1><div class="f">${esc(a.folio||"")}</div>
+    <div><b>${esc(a.cliente||"")}</b> ${a.tel?"· "+esc(a.tel):""}</div>
+    <div style="margin-top:8px">${a.cant} pz · ${esc(a.desc||"")}</div>
+    <table>
+      <tr><td>Total</td><td class="r">${pesos(a.total)}</td></tr>
+      ${(a.abonos||[]).map((x,k)=>`<tr><td>${k===0?"Anticipo":"Abono "+(k+1)} ${esc((x.fecha||"").slice(0,10))}</td><td class="r">${pesos(x.monto)}</td></tr>`).join("")}
+      <tr class="tot"><td>Saldo</td><td class="r">${pesos(saldoDe(a))}</td></tr>
+    </table>
+    <div class="pie">${a.tipo==="apartado"&&a.vence
+      ? "Se guarda hasta el "+esc((a.vence||"").slice(0,10))+"."
+      : "Le avisamos en cuanto llegue."}<br>Conserve esta nota para recoger su pieza.</div>
+    </body></html>`);
+  w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
 }
 
 async function cerrarApartado(id,estado){
@@ -733,7 +917,7 @@ async function cerrarApartado(id,estado){
 
 function avisarApartado(a){
   const llego = a.tipo==="pedido" && (porClave.get(a.clave)?.exist||0)>0;
-  const saldo = Math.max(0,(a.total||0)-(a.abonado||0));
+  const saldo = saldoDe(a);
   const texto = a.tipo==="pedido"
     ? `Hola${a.cliente?" "+a.cliente:""}, le escribo de Moto Pro. Ya llegó su pedido: ${a.desc}. `+
       (saldo>0?`Queda un saldo de ${pesos(saldo)}. `:"")+`Puede pasar por él cuando guste.`
@@ -749,29 +933,31 @@ async function pintarApartados(){
   if(!act.length){
     $("#resumen-a").textContent="";
     $("#lista-apartados").innerHTML=`<div class="vacio-msg"><div class="grande">Nada apartado</div>
-      Desde cualquier ficha puedes apartar una pieza o registrar un pedido con anticipo.</div>`;
+      Usa el botón de arriba, o el botón <b>Apartar</b> de cualquier ficha al buscar.</div>`;
+    $("#exp-apartados").classList.add("oculto");
     return;
   }
   const vencidos=act.filter(a=>a.tipo==="apartado" && a.vence && diasPara(a.vence)<0);
   const porVencer=act.filter(a=>a.tipo==="apartado" && a.vence && diasPara(a.vence)>=0 && diasPara(a.vence)<=3);
   const pedLlegaron=act.filter(a=>a.tipo==="pedido" && (porClave.get(a.clave)?.exist||0)>0);
   const resto=act.filter(a=>!vencidos.includes(a)&&!porVencer.includes(a)&&!pedLlegaron.includes(a));
-  const dinero=act.reduce((s,a)=>s+(a.abonado||0),0);
-  const saldos=act.reduce((s,a)=>s+Math.max(0,(a.total||0)-(a.abonado||0)),0);
+  $("#exp-apartados").classList.remove("oculto");
+  const dinero=act.reduce((s,a)=>s+abonado(a),0);
+  const saldos=act.reduce((s,a)=>s+saldoDe(a),0);
   $("#resumen-a").innerHTML=`<span>${act.length} activos · ${pesos(dinero)} en anticipos · ${pesos(saldos)} por cobrar</span>`;
 
   const fila=a=>{
     const d=a.vence?diasPara(a.vence):null;
     const llego=a.tipo==="pedido"&&(porClave.get(a.clave)?.exist||0)>0;
-    const saldo=Math.max(0,(a.total||0)-(a.abonado||0));
+    const saldo=saldoDe(a);
     return `<div class="ficha ${d!==null&&d<0?'venc':llego?'llego':''}">
       <div class="ficha-top">
-        <span class="clave">${esc(a.cliente||"Sin nombre")}</span>
-        <span class="exist">${esc(a.tel||"sin tel")}</span>
+        <span class="clave">${esc(a.folio||"")}</span>
+        <span class="exist">${esc(a.cliente||"Sin nombre")}</span>
       </div>
       <div class="desc"><b>${a.cant} pz</b> · ${esc(a.desc||"")}</div>
       <div class="dinero">
-        <span>Total ${pesos(a.total)}</span><span>Abonó ${pesos(a.abonado)}</span>
+        <span>Total ${pesos(a.total)}</span><span>Abonó ${pesos(abonado(a))}</span>
         <span class="${saldo>0?'debe':'pagado'}">${saldo>0?"Debe "+pesos(saldo):"Pagado"}</span>
       </div>
       <div class="mini-dato">
@@ -782,9 +968,9 @@ async function pintarApartados(){
       </div>
       ${a.notas?`<div class="notas">${esc(a.notas)}</div>`:""}
       <div class="tags" style="margin-top:9px">
-        ${a.tel?`<button class="btn-mini ${llego||d<0?'destacado':''}" data-wa="${esc(a.id)}">WhatsApp</button>`:""}
+        <button class="btn-mini destacado" data-ver="${esc(a.id)}">Abrir nota</button>
+        ${a.tel?`<button class="btn-mini ${llego||d<0?'negada':''}" data-wa="${esc(a.id)}">WhatsApp</button>`:""}
         <button class="btn-mini" data-entregar="${esc(a.id)}">Entregar</button>
-        <button class="btn-mini negada" data-cancelar="${esc(a.id)}">Cancelar</button>
       </div>
     </div>`;
   };
@@ -794,6 +980,7 @@ async function pintarApartados(){
     bloque("Ya llegaron — avisa al cliente",pedLlegaron,"verde")+
     bloque("Por vencer esta semana",porVencer)+
     bloque("Activos",resto);
+  $$("[data-ver]").forEach(b=>b.onclick=()=>verApartado(b.dataset.ver));
   $$("[data-wa]").forEach(b=>b.onclick=()=>avisarApartado(act.find(x=>x.id===b.dataset.wa)));
   $$("[data-entregar]").forEach(b=>b.onclick=()=>cerrarApartado(b.dataset.entregar,"entregado"));
   $$("[data-cancelar]").forEach(b=>b.onclick=()=>cerrarApartado(b.dataset.cancelar,"cancelado"));
@@ -1335,12 +1522,14 @@ $("#btn-import").onclick = async ()=>{
 };
 
 /* ============ EXPORTAR ============ */
+$("#nuevo-apa").onclick = elegirPieza;
+
 $("#exp-apartados").onclick = async ()=>{
   const a=await cargarApartados();
   if(!a.length){ aviso("Todavía no hay apartados ni pedidos registrados."); return; }
   const filas=a.map(x=>({ Fecha:(x.fecha||"").slice(0,10), Tipo:x.tipo, Estado:x.estado,
     Clave:x.clave||"", Descripcion:x.desc||"", Piezas:x.cant||1,
-    Total:x.total||0, Anticipo:x.abonado||0, Saldo:Math.max(0,(x.total||0)-(x.abonado||0)),
+    Folio:x.folio||"", Total:x.total||0, Abonado:abonado(x), Saldo:saldoDe(x), Abonos:(x.abonos||[]).length,
     Cliente:x.cliente||"", WhatsApp:x.tel||"", Tomo:x.quien||"", Notas:x.notas||"",
     Vence:(x.vence||"").slice(0,10), Cierre:(x.fechaCierre||"").slice(0,10) }));
   const wb=XLSX.utils.book_new();
