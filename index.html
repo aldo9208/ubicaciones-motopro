@@ -112,7 +112,9 @@ button{cursor:pointer}
 /* ---------- Genéricos ---------- */
 .vacio-msg{text-align:center;padding:48px 20px;color:var(--tinta-2)}
 .vacio-msg .grande{font-family:Oswald;font-size:20px;color:var(--tinta);margin-bottom:6px}
-.resumen{font-size:12px;color:var(--tinta-2);margin-bottom:10px;letter-spacing:.03em}
+.resumen{font-size:12px;color:var(--tinta-2);margin-bottom:10px;letter-spacing:.03em;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#resumen-b .btn-mini{margin-left:auto}
 .btn{
   border:2px solid var(--tinta);background:var(--tinta);color:#fff;border-radius:var(--r);
   padding:12px 18px;font-family:Oswald;font-size:15px;letter-spacing:.06em;text-transform:uppercase;width:100%;
@@ -381,6 +383,7 @@ function normTexto(s){
   s = String(s||"");
   for(const [a,b] of Object.entries(MOJIBAKE)){ if(a) s = s.split(a).join(b); }
   s = sinAcentos(s).toUpperCase();
+  s = s.replace(/(\d)[.,](\d)/g,"$1$2");   // medidas: 2.50-17 -> 250 17
   return s.replace(/[^A-Z0-9]+/g," ").replace(/\s+/g," ").trim();
 }
 const colapsar = s => s.replace(/[^A-Z0-9]/g,"");
@@ -391,9 +394,18 @@ function construirIndice(i){
     if(n.includes(k)) ext += " "+vs.join(" ");
     for(const v of vs) if(n.includes(v)) ext += " "+k;
   }
-  i._busca = n+" | "+colapsar(n)+" | "+colapsar(ext);
+  i._texto    = ext;              // con espacios: para términos normales
+  i._colapsado = colapsar(ext);   // sin separadores: solo para modelos
 }
-const coincide = (i,t) => i._busca.includes(t) || i._busca.includes(colapsar(t));
+/* El índice colapsado sirve para modelos escritos de varias formas:
+   FT-150 / FT 150 / FT150. Pero con un número suelto da falsos positivos —
+   "250" cae dentro de "CLASSIC 125 08" al quitarle los espacios. Por eso solo
+   se consulta cuando el término mezcla letras y dígitos, como un modelo.     */
+function coincide(i,t){
+  if(i._texto.includes(t)) return true;
+  const pareceModelo = /[A-Z]/.test(t) && /\d/.test(t);
+  return pareceModelo && i._colapsado.includes(colapsar(t));
+}
 
 /* ============ ESTADO ============ */
 let db, ITEMS=[], porClave=new Map(), esAdmin=false, filtro="todo", pestana="buscar";
@@ -616,7 +628,8 @@ function pintarBuscar(){
     return a.clave.localeCompare(b.clave);
   });
   $$(".chip.tipo").forEach(x=>x.classList.toggle("on", x.dataset.tipo===q));
-  $("#resumen-b").textContent = `${r.length} resultado${r.length===1?"":"s"}`;
+  $("#resumen-b").innerHTML = `<span>${r.length} resultado${r.length===1?"":"s"}</span>`+
+    (terminos.length?`<button class="btn-mini negada" id="neg-libre2">No es lo que pedía</button>`:"");
   $("#res").innerHTML = r.length ? r.slice(0,250).map(ficha).join("")
     : (()=>{ const prev=negadasQueCoinciden(terminos);
         return `<div class="vacio-msg"><div class="grande">No está en catálogo</div>
@@ -630,9 +643,10 @@ function pintarBuscar(){
             <div class="desc">${esc(o.desc)}</div>
             <div class="mini-dato">última: ${esc((o.ultima||"").slice(0,10))}</div></div>`).join("")}</div>`:"");
       })();
-  if($("#neg-libre")) $("#neg-libre").onclick=()=>registrarNegada({texto:$("#q").value.trim()});
   if(r.length>250) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando 250 de ${r.length}. Afina la búsqueda.</div>`);
   enlazarBotones();
+  const bLibre = $("#neg-libre") || $("#neg-libre2");
+  if(bLibre) bLibre.onclick=()=>registrarNegada({texto:$("#q").value.trim()});
 }
 
 function etiqueta(u1,u2,u3,alt){
