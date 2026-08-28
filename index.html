@@ -151,6 +151,11 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .precios-int small{display:block;font-size:10px;color:var(--tinta-2)}
 .precios-int>div:first-child{border-color:var(--azul);background:var(--azul-claro)}
 .nota-precio{font-size:11.5px;color:var(--tinta-2);margin:0}
+.diag{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:4px;margin-bottom:5px;font-size:13px;background:var(--concreto)}
+.diag b{margin-left:auto;font-family:'JetBrains Mono';font-size:14px}
+.diag.ok b{color:var(--verde)}
+.diag.mal{background:#FDECEA}
+.diag.mal b{color:var(--rojo)}
 
 /* ---------- Modo mostrador ---------- */
 .mostrador{text-align:center}
@@ -255,6 +260,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .filtros::-webkit-scrollbar{display:none}
 .chip{border:1px solid var(--linea);background:var(--superficie);border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;white-space:nowrap}
 .chip.on{background:var(--tinta);color:#fff;border-color:var(--tinta)}
+.oferta-chip{border-color:var(--verde);color:var(--verde);font-weight:700}
+.oferta-chip b{font-family:'JetBrains Mono';font-size:10px;opacity:.7;margin-left:3px}
+.oferta-chip.on{background:var(--verde);color:#fff;border-color:var(--verde)}
 .chip.tipo{font-family:Oswald;letter-spacing:.05em;font-size:12px}
 .chip.tipo b,.chip.moto b{font-family:'JetBrains Mono';font-size:10px;opacity:.6;margin-left:3px}
 .chip.moto{font-family:'JetBrains Mono';font-size:11.5px;font-weight:700;border-color:var(--azul);color:var(--azul)}
@@ -303,6 +311,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <button class="chip on" data-f="todo">Todo</button>
     <button class="chip" data-f="conex">Con existencia</button>
     <button class="chip" data-f="sinub">Sin ubicar</button>
+    <button class="chip oferta-chip" data-f="oferta">En oferta <b id="n-of"></b></button>
   </div>
   <div class="filtros" id="tipos"></div>
   <div class="filtros" id="motos"></div>
@@ -351,6 +360,13 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <div id="prev-import"></div>
     <div style="height:12px"></div>
     <button class="btn" id="btn-import" disabled>Procesar archivo</button>
+  </div>
+  <div class="tarjeta">
+    <h3>Estado de los datos</h3>
+    <p>Qué tiene cargado la app en este momento. Sirve para saber si faltó subir algún archivo.</p>
+    <div id="diagnostico"></div>
+    <div style="height:10px"></div>
+    <button class="btn sec" id="btn-diag">Revisar</button>
   </div>
   <div class="tarjeta">
     <h3>Respaldo</h3>
@@ -526,6 +542,7 @@ async function recargar(){
     porClave = new Map(ITEMS.map(i=>[i.clave,i]));
     ITEMS.forEach(construirIndice);
     pintarTipos(); pintarMotos();
+    $("#n-of").textContent = ITEMS.filter(i=>descuentoDe(i)>0).length;
     await cargarOfertas();
     await cargarApartados();
     $("#n-apa").textContent = activos().length;
@@ -1119,7 +1136,18 @@ function pintarBuscar(){
   let r = ITEMS;
   if(filtro==="conex") r = r.filter(i=>(i.exist||0)>0);
   if(filtro==="sinub") r = r.filter(i=>!tieneUbic(i));
+  if(filtro==="oferta") r = r.filter(i=>descuentoDe(i)>0);
   if(terminos.length) r = r.filter(i=>terminos.every(t=>coincide(i,t)));
+  else if(filtro==="oferta"){
+    r.sort((a,b)=>disponible(b)-disponible(a) || a.clave.localeCompare(b.clave));
+    $$(".chip.tipo,.chip.moto").forEach(x=>x.classList.remove("on"));
+    $("#resumen-b").innerHTML=`<span>${r.length} artículos en oferta</span>`;
+    $("#res").innerHTML = r.length? r.slice(0,250).map(ficha).join("")
+      : `<div class="vacio-msg"><div class="grande">Sin ofertas vigentes</div>Sube el archivo de promociones en Sincronizar.</div>`;
+    if(r.length>250) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando 250 de ${r.length}.</div>`);
+    enlazarBotones();
+    return;
+  }
   else if(filtro==="todo"){
     $("#resumen-b").textContent = `${ITEMS.length} claves en el catálogo · ${ITEMS.filter(tieneUbic).length} ubicadas`;
     $("#res").innerHTML = `<div class="vacio-msg"><div class="grande">Busca una refacción</div>Escribe la clave o parte de la descripción, o escanea el código de barras.</div>`;
@@ -1622,7 +1650,9 @@ $("#btn-import").onclick = async ()=>{
   if(filasImport.ofertas){
     try{
       await setDoc(doc(db,COL_CONFIG,"ofertas"),{lista:filasImport.ofertas,act:hoyISO()});
-      await cargarOfertas(); pintar();
+      await cargarOfertas();
+      $("#n-of").textContent = ITEMS.filter(i=>descuentoDe(i)>0).length;
+      pintar();
       $("#prev-import").innerHTML=`<div class="aviso bien"><b>Ofertas guardadas.</b> Ya se aplican en los precios.</div>`;
     }catch(e){ $("#prev-import").innerHTML=`<div class="aviso malo">${esc(e.message)}</div>`; }
     b.disabled=false; return;
@@ -1664,6 +1694,27 @@ $("#btn-import").onclick = async ()=>{
 
 /* ============ EXPORTAR ============ */
 $("#nuevo-apa").onclick = elegirPieza;
+
+/* Diagnóstico: dice exactamente qué archivo faltó, en vez de dejarte adivinar */
+$("#btn-diag").onclick = async ()=>{
+  await cargarOfertas();
+  const hoy=hoyISO().slice(0,10);
+  const conPrecio=ITEMS.filter(i=>i.p1>0).length;
+  const conCat=ITEMS.filter(i=>i.cat).length;
+  const vig=OFERTAS.filter(o=>(!o.inicia||o.inicia.slice(0,10)<=hoy)&&(!o.termina||o.termina.slice(0,10)>=hoy));
+  const conDesc=ITEMS.filter(i=>descuentoDe(i)>0).length;
+  const fila=(t,v,ok)=>`<div class="diag ${ok?'ok':'mal'}"><span>${t}</span><b>${v}</b></div>`;
+  $("#diagnostico").innerHTML =
+    fila("Artículos en catálogo", ITEMS.length, ITEMS.length>0)+
+    fila("Con precio", conPrecio, conPrecio>0)+
+    fila("Con categoría", conCat, conCat>0)+
+    fila("Ofertas cargadas", OFERTAS.length, OFERTAS.length>0)+
+    fila("Ofertas vigentes hoy", vig.length, vig.length>0)+
+    fila("Artículos con descuento", conDesc, conDesc>0)+
+    (conCat===0?`<div class="aviso malo">Falta el archivo de <b>categorías</b>. Sin categoría no se puede aplicar ninguna oferta.</div>`:"")+
+    (OFERTAS.length===0?`<div class="aviso malo">Falta el archivo de <b>promociones</b>, o no se pudo guardar.</div>`:"")+
+    (conCat>0&&OFERTAS.length>0&&conDesc===0?`<div class="aviso malo">Los dos archivos están, pero ninguna categoría del catálogo coincide con las de las ofertas.<br>Categorías en ofertas: ${esc(OFERTAS.map(o=>o.cat).slice(0,6).join(", "))}</div>`:"");
+};
 
 $("#exp-apartados").onclick = async ()=>{
   const a=await cargarApartados();
