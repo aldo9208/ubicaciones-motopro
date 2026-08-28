@@ -201,6 +201,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .mini-dato{font-size:11.5px;color:var(--tinta-2);letter-spacing:.02em}
 .pedida{margin-top:8px;font-size:12px;font-weight:600;color:var(--rojo);
   background:#FDECEA;border-radius:4px;padding:6px 9px;display:inline-block}
+.ficha.llego{border-left-color:var(--verde);background:#F2FAF6}
+.estado-llego{font-family:Oswald;font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--verde)}
+.estado-espera{font-family:Oswald;font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--tinta-2)}
 @media(prefers-reduced-motion:reduce){.toast{transition:none}}
 .cargando{text-align:center;padding:60px 20px;color:var(--tinta-2);font-family:Oswald;letter-spacing:.08em;text-transform:uppercase}
 .filtros{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;scrollbar-width:none}
@@ -483,6 +486,9 @@ async function registrarNegada({clave,texto}){
     <div class="cants">
       ${[1,2,3,4,5,10].map((n,k)=>`<button class="cant ${k===0?'on':''}" data-c="${n}">${n}</button>`).join("")}
     </div>
+    <label class="lbl">Contacto del cliente <span style="text-transform:none;letter-spacing:0">(opcional — para avisarle cuando llegue)</span></label>
+    <input type="text" id="cli-nom" placeholder="Nombre del cliente">
+    <input type="tel" id="cli-tel" placeholder="WhatsApp — 10 dígitos" inputmode="numeric" style="margin-top:8px">
     <label class="lbl">¿Quién atiende? <span style="text-transform:none;letter-spacing:0">(opcional)</span></label>
     <input type="text" id="quien" value="${esc(ultimoQuien)}" placeholder="Nombre o iniciales">
     ${!clave?`<label class="lbl">¿Qué pedía exactamente?</label>
@@ -497,14 +503,17 @@ async function registrarNegada({clave,texto}){
   $("#g-neg").onclick=async ()=>{
     const b=$("#g-neg"); b.disabled=true; b.textContent="Guardando…";
     ultimoQuien = $("#quien").value.trim();
+    const id=`${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
     const reg={
-      clave: clave||"", desc: i? (i.desc||"") : ($("#texto-neg")?.value.trim()||texto||""),
+      id, clave: clave||"", desc: i? (i.desc||"") : ($("#texto-neg")?.value.trim()||texto||""),
       cant, quien: ultimoQuien,
+      nombre: $("#cli-nom").value.trim(), tel: soloDigitos($("#cli-tel").value),
+      avisado: false,
       motivo: clave? "sin existencia" : "no lo manejamos",
       fecha: new Date().toISOString()
     };
     try{
-      await setDoc(doc(db,COL_NEGADAS,`${Date.now()}_${Math.random().toString(36).slice(2,8)}`), reg);
+      await setDoc(doc(db,COL_NEGADAS,id), reg);
       if(NEGADAS) NEGADAS.unshift(reg);
       cerrarModal();
       aviso("Registrado. Aparecerá en la pestaña Negadas.","bien");
@@ -516,7 +525,7 @@ async function cargarNegadas(){
   if(NEGADAS) return NEGADAS;
   try{
     const s=await getDocs(collection(db,COL_NEGADAS));
-    NEGADAS=s.docs.map(d=>d.data()).sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
+    NEGADAS=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
   }catch(e){ NEGADAS=[]; }
   NEGADAS.forEach(construirIndice);
   return NEGADAS;
@@ -540,6 +549,54 @@ function negadasQueCoinciden(terminos){
     if((x.fecha||"")>o.ultima) o.ultima=x.fecha;
   });
   return [...g.values()].sort((a,b)=>b.veces-a.veces);
+}
+
+/* ============ LISTA DE ESPERA ============
+   Un cliente que dejó su WhatsApp esperando una pieza. Cuando la
+   sincronización de SAIT la trae de vuelta, aparece lista para avisarle.   */
+const soloDigitos = s => String(s||"").replace(/\D/g,"");
+function telWA(t){                      // deja el número listo para wa.me
+  const d=soloDigitos(t);
+  if(d.length===10) return "52"+d;      // celular mexicano
+  if(d.length===12 && d.startsWith("52")) return d;
+  if(d.length===13 && d.startsWith("521")) return "52"+d.slice(3);
+  return d;
+}
+const yaLlego = r => r.clave && (porClave.get(r.clave)?.exist||0)>0;
+
+function esperando(){
+  return (NEGADAS||[]).filter(r=>r.tel && !r.avisado)
+    .sort((a,b)=>(yaLlego(b)?1:0)-(yaLlego(a)?1:0) || (b.fecha||"").localeCompare(a.fecha||""));
+}
+
+async function avisar(reg){
+  const it = reg.clave? porClave.get(reg.clave) : null;
+  const precio = it&&it.p1>0 ? ` Precio: ${pesos(conIva(it.p1))} con IVA.` : "";
+  const texto = `Hola${reg.nombre?" "+reg.nombre:""}, le escribo de Moto Pro. `+
+    `Ya nos llegó la refacción que buscaba: ${reg.desc}.${precio} `+
+    `¿Se la aparto?`;
+  window.open(`https://wa.me/${telWA(reg.tel)}?text=${encodeURIComponent(texto)}`,"_blank");
+  try{
+    await setDoc(doc(db,COL_NEGADAS,reg.id),{avisado:true,fechaAviso:new Date().toISOString()},{merge:true});
+    reg.avisado=true; pintarNegadas();
+  }catch(e){ aviso("Se abrió WhatsApp, pero no se pudo marcar como avisado."); }
+}
+
+function filaEspera(r){
+  const llego=yaLlego(r);
+  const it=r.clave?porClave.get(r.clave):null;
+  return `<div class="ficha ${llego?'llego':''}">
+    <div class="ficha-top">
+      <span class="clave">${esc(r.nombre||"Cliente")}</span>
+      <span class="exist">${esc(r.tel)}</span>
+    </div>
+    <div class="desc">${esc(r.desc||"")}</div>
+    <div class="renglon-precio">
+      <span class="${llego?'estado-llego':'estado-espera'}">${llego?`Ya llegó — ${it.exist} pz`:"Aún no llega"}</span>
+      <button class="btn-mini ${llego?'destacado':''}" data-avisar="${esc(r.id)}">Avisar por WhatsApp</button>
+    </div>
+    <div class="mini-dato">pidió ${r.cant||1} pz el ${esc((r.fecha||"").slice(0,10))}</div>
+  </div>`;
 }
 
 async function pintarNegadas(){
@@ -577,11 +634,17 @@ async function pintarNegadas(){
       <div class="mini-dato">última: ${esc((o.ultima||"").slice(0,10))}</div>
     </div>`;
   };
+  const esp=esperando(), listos=esp.filter(yaLlego);  // sin corte de fecha: un cliente espera hasta que se le avisa
   $("#lista-negadas").innerHTML =
+    (esp.length?`<h3 class="sec-tit">Clientes esperando aviso (${esp.length}${listos.length?` · ${listos.length} ya llegaron`:""})</h3>
+       <div class="lista">${esp.map(filaEspera).join("")}</div>`:"")+
     (enCat.length?`<h3 class="sec-tit">Sí las manejas, pero se acabaron (${enCat.length})</h3>
        <div class="lista">${enCat.map(fila).join("")}</div>`:"")+
     (fuera.length?`<h3 class="sec-tit">No están en catálogo — demanda que no cubres (${fuera.length})</h3>
        <div class="lista">${fuera.map(fila).join("")}</div>`:"");
+  $$("[data-avisar]").forEach(b=>b.onclick=()=>{
+    const r=(NEGADAS||[]).find(x=>x.id===b.dataset.avisar); if(r) avisar(r);
+  });
 }
 
 /* Accesos rápidos: las familias de pieza más numerosas del catálogo */
@@ -1056,6 +1119,9 @@ $("#btn-import").onclick = async ()=>{
     b.textContent="Procesar archivo";
     $("#prev-import").innerHTML=`<div class="aviso bien"><b>Listo.</b> ${hechas} claves guardadas, ${nuevas} nuevas.</div>`;
     await recargar();
+    await cargarNegadas();
+    const listos=esperando().filter(yaLlego).length;
+    if(listos) aviso(`Llegaron piezas que ${listos} cliente(s) estaban esperando. Revisa la pestaña Negadas.`,"bien");
   }catch(e){
     b.disabled=false; b.textContent="Procesar archivo";
     $("#prev-import").innerHTML=`<div class="aviso malo"><b>Se interrumpió en la fila ${hechas}.</b><br>${esc(e.message)}</div>`;
@@ -1067,7 +1133,8 @@ $("#exp-negadas").onclick = async ()=>{
   const n=await cargarNegadas();
   if(!n.length){ aviso("Todavía no hay ventas negadas registradas."); return; }
   const filas=n.map(x=>({ Fecha:(x.fecha||"").slice(0,10), Hora:(x.fecha||"").slice(11,16),
-    Clave:x.clave||"", Descripcion:x.desc||"", Piezas:x.cant||1, Motivo:x.motivo||"", Quien:x.quien||"" }));
+    Clave:x.clave||"", Descripcion:x.desc||"", Piezas:x.cant||1, Motivo:x.motivo||"", Quien:x.quien||"",
+    Cliente:x.nombre||"", WhatsApp:x.tel||"", Avisado:x.avisado?"si":"no" }));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), "Negadas");
   XLSX.writeFile(wb, `ventas_negadas_${new Date().toISOString().slice(0,10)}.xlsx`);
