@@ -135,6 +135,11 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 /* ---------- Precio ---------- */
 .renglon-precio{display:flex;align-items:center;gap:10px;margin:2px 0 10px;flex-wrap:wrap}
 .precio{font-family:Oswald;font-size:22px;font-weight:700;letter-spacing:.01em;line-height:1}
+
+.precio.oferta{color:var(--verde)}
+.antes{font-size:13px;color:var(--tinta-2);text-decoration:line-through;margin-left:7px}
+.badge-of{font-family:Oswald;font-size:11px;letter-spacing:.06em;background:var(--verde);color:#fff;border-radius:3px;padding:3px 6px;margin-left:6px}
+.m-antes{font-size:22px;color:var(--tinta-2);text-decoration:line-through;font-weight:500}
 .precio small{font-family:Inter;font-size:10px;font-weight:600;color:var(--tinta-2);letter-spacing:.08em;text-transform:uppercase;margin-left:6px}
 .sin-precio{font-family:Oswald;font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--rojo)}
 .btn-mini.destacado{margin-left:auto;background:var(--azul);color:#fff;border-color:var(--azul)}
@@ -377,6 +382,7 @@ const COLECCION = "motopro_ubicaciones";
 const COL_FOTOS = "motopro_fotos";
 const COL_NEGADAS = "motopro_negadas";
 const COL_APARTADOS = "motopro_apartados";
+const COL_CONFIG = "motopro_config";
 const CLAVE_ADMIN = "motopro2026";   // <-- cámbiala por la que quieras
 const IVA = 0.16;                     // Precio 1 viene sin IVA en SAIT
 
@@ -520,6 +526,7 @@ async function recargar(){
     porClave = new Map(ITEMS.map(i=>[i.clave,i]));
     ITEMS.forEach(construirIndice);
     pintarTipos(); pintarMotos();
+    await cargarOfertas();
     await cargarApartados();
     $("#n-apa").textContent = activos().length;
     cargarNegadas().then(()=>{ if(pestana==="buscar") pintarBuscar(); });
@@ -654,7 +661,8 @@ function esperando(){
 
 async function avisar(reg){
   const it = reg.clave? porClave.get(reg.clave) : null;
-  const precio = it&&it.p1>0 ? ` Precio: ${pesos(conIva(it.p1))} con IVA.` : "";
+  const pp = it?precioDe(it):{hay:false};
+  const precio = pp.hay ? ` Precio: ${pesos(pp.final)} con IVA${pp.desc?` (oferta −${pp.desc}%)`:""}.` : "";
   const texto = `Hola${reg.nombre?" "+reg.nombre:""}, le escribo de Moto Pro. `+
     `Ya nos llegó la refacción que buscaba: ${reg.desc}.${precio} `+
     `¿Se la aparto?`;
@@ -742,7 +750,7 @@ function elegirPieza(){
       <button class="sel-item" data-pick="${esc(i.clave)}">
         <span class="clave">${esc(i.clave)}</span>
         <span class="desc">${esc(i.desc||"")}</span>
-        <span class="mini-dato">${disponible(i)} disponible(s)${i.p1>0?" · "+pesos(conIva(i.p1)):""}</span>
+        <span class="mini-dato">${disponible(i)} disponible(s)${precioDe(i).hay?" · "+pesos(precioDe(i).final):""}</span>
       </button>`).join("")
       : `<div class="mini-dato" style="padding:10px 2px">Sin resultados.</div>`;
     $$("[data-pick]").forEach(b=>b.onclick=()=>{ const c=b.dataset.pick; cerrarModal(); nuevoApartado(c); });
@@ -756,7 +764,7 @@ async function nuevoApartado(clave, libre){
   const i = clave? porClave.get(clave) : null;
   if(clave && !i) return;
   const hay = i? disponible(i)>0 : false;          // sin clave siempre es pedido
-  const punit = i && i.p1>0 ? +conIva(i.p1).toFixed(2) : 0;
+  const punit = i ? (precioDe(i).final||0) : 0;
   const desc = i? (i.desc||"") : (libre||"");
   abrirModal(`
     <h2>${hay?"Apartar pieza":"Pedido sobre encargo"}</h2>
@@ -1152,9 +1160,43 @@ function etiqueta(u1,u2,u3,alt){
          (u3?`<span class="t3">${esc(u3)}</span>`:"")+`</span>`;
 }
 
+/* ============ OFERTAS ============
+   Los descuentos se aplican por CATEGORÍA y tienen vigencia. No se guardan
+   como precio fijo: se calculan al mostrar, contra la fecha de hoy. Así una
+   oferta vencida deja de aplicarse sola, sin que nadie tenga que acordarse. */
+let OFERTAS=[];
+
+async function cargarOfertas(){
+  try{
+    const s=await getDoc(doc(db,COL_CONFIG,"ofertas"));
+    OFERTAS = s.exists()? (s.data().lista||[]) : [];
+  }catch(e){ OFERTAS=[]; }
+}
+/* Descuento vigente para un artículo, en porcentaje. 0 si no tiene. */
+function descuentoDe(i){
+  if(!i.cat) return 0;
+  const hoy=hoyISO().slice(0,10), c=normTexto(i.cat);
+  const o=OFERTAS.find(x=>normTexto(x.cat)===c &&
+    (!x.inicia || x.inicia.slice(0,10)<=hoy) && (!x.termina || x.termina.slice(0,10)>=hoy));
+  return o? (o.desc||0) : 0;
+}
+/* Precio al cliente de mostrador: Precio 1, menos descuento, más IVA. */
+function precioDe(i){
+  const base=i.p1||0;
+  if(base<=0) return {hay:false};
+  const d=descuentoDe(i);
+  return { hay:true, desc:d,
+           lista:+conIva(base).toFixed(2),
+           final:+conIva(base*(1-d/100)).toFixed(2) };
+}
+
 function precioHtml(i){
-  if(!i.p1 || i.p1<=0) return `<span class="sin-precio">Sin precio en SAIT</span>`;
-  return `<span class="precio">${pesos(conIva(i.p1))}<small>c/IVA</small></span>`;
+  const p=precioDe(i);
+  if(!p.hay) return `<span class="sin-precio">Sin precio en SAIT</span>`;
+  if(!p.desc) return `<span class="precio">${pesos(p.final)}<small>c/IVA</small></span>`;
+  return `<span class="precio oferta">${pesos(p.final)}<small>c/IVA</small></span>`+
+         `<span class="antes">${pesos(p.lista)}</span>`+
+         `<span class="badge-of">-${p.desc}%</span>`;
 }
 
 function ficha(i){
@@ -1271,11 +1313,14 @@ async function guardarFoto(clave,dataUrl){
 async function mostrador(clave){
   const i=porClave.get(clave); if(!i) return;
   const hay=disponible(i)>0;
-  const precio = (i.p1&&i.p1>0) ? pesos(conIva(i.p1)) : null;
+  const p=precioDe(i);
   abrirModal(`<div class="mostrador">
       <div class="m-foto" id="m-foto"><div class="m-cargando">Cargando foto…</div></div>
       <div class="m-desc">${esc(i.desc||"")}</div>
-      <div class="m-precio">${precio? precio+'<small>IVA incluido</small>' : '<span class="sin-precio">Consultar en caja</span>'}</div>
+      <div class="m-precio">${p.hay
+        ? (p.desc?`<span class="m-antes">${pesos(p.lista)}</span> `:"")+pesos(p.final)+
+          `<small>${p.desc?`Oferta −${p.desc}% · IVA incluido`:"IVA incluido"}</small>`
+        : '<span class="sin-precio">Consultar en caja</span>'}</div>
       <div class="m-disp ${hay?'si':'no'}">${hay?"Disponible":"Sin existencia"}</div>
       <div class="acciones">
         <button class="btn sec" data-cerrar>Cerrar</button>
@@ -1335,7 +1380,8 @@ function aviso(msg,tipo){
 const enlaceWA = t => "https://wa.me/?text="+encodeURIComponent(t);
 
 async function compartir(i,img){
-  const precio=(i.p1&&i.p1>0)? `\nPrecio: ${pesos(conIva(i.p1))} (IVA incluido)` : "";
+  const pp=precioDe(i);
+  const precio=pp.hay? `\nPrecio: ${pesos(pp.final)} (IVA incluido)`+(pp.desc?` — oferta −${pp.desc}%`:"") : "";
   const texto=`${i.desc}\nClave: ${i.clave}${precio}\n${(i.exist||0)>0?"Disponible":"Sobre pedido"}\n\nMoto Pro`;
 
   if(!img){
@@ -1381,11 +1427,13 @@ async function editar(clave){
     <h2>${esc(i.clave)}</h2>
     <p class="sub-t">${esc(i.desc||"")}</p>
     <div class="precios-int">
-      <div><span>Mostrador</span><b>${i.p1>0?pesos(conIva(i.p1)):"—"}</b><small>${i.p1>0?pesos(i.p1)+" + IVA":"sin precio"}</small></div>
+      <div><span>Mostrador</span><b>${precioDe(i).hay?pesos(precioDe(i).final):"—"}</b><small>${
+        precioDe(i).hay?(descuentoDe(i)?`lista ${pesos(precioDe(i).lista)} · −${descuentoDe(i)}%`:pesos(i.p1)+" + IVA"):"sin precio"}</small></div>
       <div><span>Lista 2</span><b>${i.p2>0?pesos(conIva(i.p2)):"—"}</b><small>${i.p2>0?pesos(i.p2)+" + IVA":""}</small></div>
       <div><span>Lista 3</span><b>${i.p3>0?pesos(conIva(i.p3)):"—"}</b><small>${i.p3>0?pesos(i.p3)+" + IVA":""}</small></div>
     </div>
-    <p class="nota-precio">Los precios se actualizan solo desde SAIT. Última carga: ${esc((i.act||"").slice(0,10)||"—")}</p>
+    <p class="nota-precio">Precios y ofertas se actualizan solo desde SAIT. Última carga: ${esc((i.act||"").slice(0,10)||"—")}${
+      i.cat?` · categoría ${esc(i.cat)}`:""}</p>
     <label class="lbl">Ubicación principal</label>
     <div class="grid3">
       <select id="e1">${opciones(MUEBLES,i.u1)}</select>
@@ -1473,7 +1521,7 @@ $("#archivo").onchange = async e=>{
   const f=e.target.files[0]; if(!f) return;
   $("#prev-import").innerHTML='<div class="resumen">Leyendo archivo…</div>';
   try{
-    const wb = XLSX.read(await f.arrayBuffer(),{type:"array"});
+    const wb = XLSX.read(await f.arrayBuffer(),{type:"array",cellDates:true});
     const hoja = wb.Sheets[wb.SheetNames[0]];
     const bruto = XLSX.utils.sheet_to_json(hoja,{header:1,defval:null,raw:true});
     // localizar la fila de encabezados
@@ -1481,6 +1529,34 @@ $("#archivo").onchange = async e=>{
     for(let r=0;r<Math.min(20,bruto.length);r++){
       const fila=(bruto[r]||[]).map(c=>limpiar(c));
       if(fila.some(c=>c==="CLAVE")){ hi=r; break; }
+    }
+    // ¿Es el archivo de promociones? Trae "% Desc." y "Categoría", y su
+    // columna Clave viene vacía porque el descuento aplica por categoría.
+    let hOf=-1;
+    for(let r=0;r<Math.min(20,bruto.length);r++){
+      const f2=(bruto[r]||[]).map(c=>normTexto(c));
+      if(f2.includes("DESC") && f2.includes("CATEGORIA")){ hOf=r; break; }
+    }
+    if(hOf>=0){
+      const cab2=(bruto[hOf]||[]).map(c=>normTexto(c));
+      const iCat=cab2.indexOf("CATEGORIA"), iD2=cab2.indexOf("DESC"),
+            iIni=cab2.indexOf("INICIA"), iFin=cab2.indexOf("TERMINA");
+      const fecha=v=> v instanceof Date ? v.toISOString() : (v?String(v):"");
+      const lista=[];
+      for(let r=hOf+1;r<bruto.length;r++){
+        const f2=bruto[r]||[]; const cat=String(f2[iCat]??"").trim();
+        if(!cat || cat.toUpperCase()==="NAN") continue;
+        lista.push({cat, desc:Number(f2[iD2])||0, inicia:fecha(f2[iIni]), termina:fecha(f2[iFin])});
+      }
+      if(!lista.length) throw new Error("No encontré filas de promociones en el archivo.");
+      filasImport={ofertas:lista};
+      const hoy=hoyISO().slice(0,10);
+      const vig=lista.filter(o=>(!o.inicia||o.inicia.slice(0,10)<=hoy)&&(!o.termina||o.termina.slice(0,10)>=hoy));
+      $("#prev-import").innerHTML=`<div class="aviso bien">
+        <b>Archivo de promociones.</b><br>
+        ${lista.length} ofertas · ${vig.length} vigentes hoy<br>
+        Aplican por categoría al precio de mostrador.</div>`;
+      $("#btn-import").disabled=false; return;
     }
     if(hi<0) throw new Error("No encontré una columna llamada 'Clave' en las primeras 20 filas.");
     const cab = (bruto[hi]||[]).map(c=>limpiar(c));
@@ -1491,8 +1567,9 @@ $("#archivo").onchange = async e=>{
           iU3=cab.findIndex(c=>c==="UBICACION 3"), iO=cab.findIndex(c=>c.startsWith("OBSERVACION")),
           iCB=cab.findIndex(c=>c.includes("BARRA")||c==="CODIGO"),
           iP1=cab.findIndex(c=>c==="PRECIO 1"), iP2=cab.findIndex(c=>c==="PRECIO 2"),
-          iP3=cab.findIndex(c=>c==="PRECIO 3");
-    const traeUbic = iU1>=0, traePrecio = iP1>=0;
+          iP3=cab.findIndex(c=>c==="PRECIO 3"),
+          iCat=cab.findIndex(c=>c.startsWith("CATEGO")), iPrv=cab.findIndex(c=>c.startsWith("PROVEEDOR"));
+    const traeUbic = iU1>=0, traePrecio = iP1>=0, traeCat = iCat>=0;
     filasImport=[]; let corregidas=0;
     for(let r=hi+1;r<bruto.length;r++){
       const f2=bruto[r]||[]; let clave=String(f2[iC]??"").trim();
@@ -1503,6 +1580,11 @@ $("#archivo").onchange = async e=>{
         exist: iE>=0? (Number(f2[iE])||0) : null,
         cb: iCB>=0? String(f2[iCB]??"").trim() : "",
         obs: iO>=0? String(f2[iO]??"").trim() : "" };
+      if(traeCat){
+        const c=String(f2[iCat]??"").trim();
+        o.cat = (c&&c.toUpperCase()!=="NAN")? c : "";
+        if(iPrv>=0){ const pv=String(f2[iPrv]??"").trim(); o.prov=(pv&&pv.toUpperCase()!=="NAN")?pv:""; }
+      }
       if(traePrecio){
         o.p1=Number(f2[iP1])||0;
         o.p2=iP2>=0?(Number(f2[iP2])||0):0;
@@ -1522,7 +1604,8 @@ $("#archivo").onchange = async e=>{
       ${nuevas.length} claves nuevas · ${filasImport.length-nuevas.length} ya en el catálogo<br>
       ${traeUbic?"Trae ubicaciones: se actualizarán.":""}
       ${traePrecio?`Trae precios: se actualizarán (${sinPrecio} sin Precio 1).`:""}
-      ${!traeUbic&&!traePrecio?"Solo descripción y existencias.":""}
+      ${traeCat?`Trae categorías: ${filasImport.filter(x=>x.cat).length} con categoría (las ofertas se aplican por ahí).`:""}
+      ${!traeUbic&&!traePrecio&&!traeCat?"Solo descripción y existencias.":""}
       ${corregidas?`<br>${corregidas} clave(s) corregida(s) por daño de Excel.`:""}
     </div>`;
     $("#btn-import").disabled=false;
@@ -1536,6 +1619,14 @@ $("#btn-import").onclick = async ()=>{
   if(!filasImport) return;
   if(!esAdmin && !(await pedirClave())) return;
   const b=$("#btn-import"); b.disabled=true;
+  if(filasImport.ofertas){
+    try{
+      await setDoc(doc(db,COL_CONFIG,"ofertas"),{lista:filasImport.ofertas,act:hoyISO()});
+      await cargarOfertas(); pintar();
+      $("#prev-import").innerHTML=`<div class="aviso bien"><b>Ofertas guardadas.</b> Ya se aplican en los precios.</div>`;
+    }catch(e){ $("#prev-import").innerHTML=`<div class="aviso malo">${esc(e.message)}</div>`; }
+    b.disabled=false; return;
+  }
   let hechas=0, nuevas=0;
   try{
     for(let s=0;s<filasImport.length;s+=400){
@@ -1550,6 +1641,7 @@ $("#btn-import").onclick = async ()=>{
         if(x.cb) d.cb=x.cb;
         if(x.obs) d.obs=x.obs;
         if("p1" in x){ d.p1=x.p1; d.p2=x.p2; d.p3=x.p3; }
+        if("cat" in x){ d.cat=x.cat; if("prov" in x) d.prov=x.prov; }
         if("u1" in x){ d.u1=x.u1; d.u2=x.u2; d.u3=x.u3; d.b1=x.b1; d.b2=x.b2; d.b3=x.b3; }
         else if(!prev){ d.u1=""; d.u2=""; d.u3=""; }
         lote.set(doc(db,COLECCION,idDoc(x.clave)), d, {merge:true});
