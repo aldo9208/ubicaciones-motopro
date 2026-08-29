@@ -703,7 +703,7 @@ function filaEspera(r){
       <span class="${llego?'estado-llego':'estado-espera'}">${llego?`Ya llegó — ${it.exist} pz`:"Aún no llega"}</span>
       <button class="btn-mini ${llego?'destacado':''}" data-avisar="${esc(r.id)}">Avisar por WhatsApp</button>
     </div>
-    <div class="mini-dato">pidió ${r.cant||1} pz el ${esc((r.fecha||"").slice(0,10))}</div>
+    <div class="mini-dato">pidió ${r.cant||1} pz el ${esc(fechaCorta(r.fecha))} ${esc(horaCorta(r.fecha))}</div>
   </div>`;
 }
 
@@ -715,10 +715,24 @@ const DIAS_APARTADO = 30;
 let APARTADOS=null;
 
 const hoyISO = () => new Date().toISOString();
+/* Las marcas de tiempo se guardan en UTC. Veracruz está a UTC-6, así que un
+   registro hecho después de las 6 pm caía en el día siguiente al mostrarlo.
+   Estas dos funciones convierten a la fecha local antes de escribirla.      */
+function fechaISO(s){                    // 2026-08-28 — para Excel y comparar
+  if(!s) return "";
+  const d=new Date(s); if(isNaN(d)) return String(s).slice(0,10);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function fechaCorta(s){                  // 28/08/2026 — para leer en pantalla
+  if(!s) return "";
+  const d=new Date(s); if(isNaN(d)) return String(s).slice(0,10);
+  return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
+}
+const horaCorta = s => { const d=new Date(s); return isNaN(d)?"":
+  `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
 /* Folio corto para la nota de papel: A-260828-01 (apartado) / P-... (pedido) */
 function nuevoFolio(tipo){
-  const d=new Date(), y=String(d.getFullYear()).slice(2),
-        m=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0");
+  const f=fechaISO(hoyISO()), y=f.slice(2,4), m=f.slice(5,7), dd=f.slice(8,10);
   const base=`${tipo==="pedido"?"P":"A"}-${y}${m}${dd}`;
   const n=(APARTADOS||[]).filter(a=>(a.folio||"").startsWith(base)).length+1;
   return `${base}-${String(n).padStart(2,"0")}`;
@@ -867,7 +881,7 @@ function verApartado(id){
     <label class="lbl">Abonos</label>
     ${(a.abonos||[]).length? `<div class="abonos">${a.abonos.map((x,k)=>`
         <div class="abono"><span>${k===0?"Anticipo":"Abono "+(k+1)}</span>
-          <span class="f">${esc((x.fecha||"").slice(0,10))}${x.quien?" · "+esc(x.quien):""}</span>
+          <span class="f">${esc(fechaCorta(x.fecha))}${x.quien?" · "+esc(x.quien):""}</span>
           <b>${pesos(x.monto)}</b></div>`).join("")}</div>`
       : `<div class="mini-dato">Sin abonos registrados.</div>`}
     ${a.estado==="activo"&&saldo>0?`
@@ -878,7 +892,7 @@ function verApartado(id){
 
     <div class="mini-dato" style="margin-top:14px">
       ${a.tipo==="apartado"
-        ? (d<0?`Venció hace ${-d} día(s)`:`Vence el ${(a.vence||"").slice(0,10)} — ${d} día(s)`)
+        ? (d<0?`Venció hace ${-d} día(s)`:`Vence el ${fechaCorta(a.vence)} — ${d} día(s)`)
         : (llego?"Ya llegó al almacén":"Esperando al proveedor")}
       ${a.quien?` · tomó ${esc(a.quien)}`:""}
     </div>
@@ -924,9 +938,9 @@ function textoNota(a){
   const l=[`MOTO PRO — Nota ${a.folio}`,``,
     `${a.cant} pz · ${a.desc}`,
     `Total: ${pesos(a.total)}`];
-  (a.abonos||[]).forEach((x,k)=>l.push(`${k===0?"Anticipo":"Abono "+(k+1)} ${(x.fecha||"").slice(0,10)}: ${pesos(x.monto)}`));
+  (a.abonos||[]).forEach((x,k)=>l.push(`${k===0?"Anticipo":"Abono "+(k+1)} ${fechaCorta(x.fecha)}: ${pesos(x.monto)}`));
   l.push(`Saldo pendiente: ${pesos(saldoDe(a))}`);
-  if(a.tipo==="apartado"&&a.vence) l.push(``,`Lo guardamos hasta el ${(a.vence||"").slice(0,10)}.`);
+  if(a.tipo==="apartado"&&a.vence) l.push(``,`Lo guardamos hasta el ${fechaCorta(a.vence)}.`);
   else l.push(``,`Le avisamos en cuanto llegue.`);
   return l.join("\n");
 }
@@ -951,11 +965,11 @@ function imprimirNota(a){
     <div style="margin-top:8px">${a.cant} pz · ${esc(a.desc||"")}</div>
     <table>
       <tr><td>Total</td><td class="r">${pesos(a.total)}</td></tr>
-      ${(a.abonos||[]).map((x,k)=>`<tr><td>${k===0?"Anticipo":"Abono "+(k+1)} ${esc((x.fecha||"").slice(0,10))}</td><td class="r">${pesos(x.monto)}</td></tr>`).join("")}
+      ${(a.abonos||[]).map((x,k)=>`<tr><td>${k===0?"Anticipo":"Abono "+(k+1)} ${esc(fechaCorta(x.fecha))}</td><td class="r">${pesos(x.monto)}</td></tr>`).join("")}
       <tr class="tot"><td>Saldo</td><td class="r">${pesos(saldoDe(a))}</td></tr>
     </table>
     <div class="pie">${a.tipo==="apartado"&&a.vence
-      ? "Se guarda hasta el "+esc((a.vence||"").slice(0,10))+"."
+      ? "Se guarda hasta el "+esc(fechaCorta(a.vence))+"."
       : "Le avisamos en cuanto llegue."}<br>Conserve esta nota para recoger su pieza.</div>
     </body></html>`);
   w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
@@ -978,7 +992,7 @@ function avisarApartado(a){
       (saldo>0?`Queda un saldo de ${pesos(saldo)}. `:"")+`Puede pasar por él cuando guste.`
     : `Hola${a.cliente?" "+a.cliente:""}, le escribo de Moto Pro. Le recordamos su apartado: ${a.desc}. `+
       (saldo>0?`Saldo pendiente ${pesos(saldo)}. `:"")+
-      `Lo tenemos guardado hasta el ${(a.vence||"").slice(0,10)}.`;
+      `Lo tenemos guardado hasta el ${fechaCorta(a.vence)}.`;
   window.open(`https://wa.me/${telWA(a.tel)}?text=${encodeURIComponent(texto)}`,"_blank");
 }
 
@@ -1017,7 +1031,7 @@ async function pintarApartados(){
       </div>
       <div class="mini-dato">
         ${a.tipo==="apartado"
-          ? (d<0?`Venció hace ${-d} día(s)`:`Vence en ${d} día(s) — ${(a.vence||"").slice(0,10)}`)
+          ? (d<0?`Venció hace ${-d} día(s)`:`Vence en ${d} día(s) — ${fechaCorta(a.vence)}`)
           : (llego?"Ya llegó al almacén":"Esperando al proveedor")}
         ${a.quien?` · tomó ${esc(a.quien)}`:""}
       </div>
@@ -1059,7 +1073,7 @@ async function pintarNegadas(){
     const o=g.get(k); o.veces++; o.piezas+=(x.cant||1);
     if((x.fecha||"")>o.ultima) o.ultima=x.fecha;
   });
-  const orden=[...g.values()].sort((a,b)=>b.piezas-a.piezas||b.veces-a.veces);
+  const orden=[...g.values()].sort((a,b)=>b.veces-a.veces || b.piezas-a.piezas || (b.ultima||"").localeCompare(a.ultima||""));
   const enCat=orden.filter(o=>o.clave), fuera=orden.filter(o=>!o.clave);
   $("#resumen-n").textContent=`${r.length} registros · ${r.reduce((s,x)=>s+(x.cant||1),0)} piezas perdidas`;
 
@@ -1073,7 +1087,7 @@ async function pintarNegadas(){
       <div class="desc">${esc(o.desc||"—")}</div>
       ${it?`<div class="tags">${etiqueta(it.u1,it.u2,it.u3)}
         <span class="mini-dato">hoy: ${it.exist||0} pz</span></div>`:""}
-      <div class="mini-dato">última: ${esc((o.ultima||"").slice(0,10))}</div>
+      <div class="mini-dato">última: ${esc(fechaCorta(o.ultima))} ${esc(horaCorta(o.ultima))}</div>
     </div>`;
   };
   const esp=esperando(), listos=esp.filter(yaLlego);  // sin corte de fecha: un cliente espera hasta que se le avisa
@@ -1173,7 +1187,7 @@ function pintarBuscar(){
             <div class="ficha-top"><span class="clave">— sin clave —</span>
             <span class="exist"><b>${o.piezas}</b> pz · ${o.veces} vez${o.veces===1?"":"es"}</span></div>
             <div class="desc">${esc(o.desc)}</div>
-            <div class="mini-dato">última: ${esc((o.ultima||"").slice(0,10))}</div></div>`).join("")}</div>`:"");
+            <div class="mini-dato">última: ${esc(fechaCorta(o.ultima))} ${esc(horaCorta(o.ultima))}</div></div>`).join("")}</div>`:"");
       })();
   if(r.length>250) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando 250 de ${r.length}. Afina la búsqueda.</div>`);
   enlazarBotones();
@@ -1203,9 +1217,9 @@ async function cargarOfertas(){
 /* Descuento vigente para un artículo, en porcentaje. 0 si no tiene. */
 function descuentoDe(i){
   if(!i.cat) return 0;
-  const hoy=hoyISO().slice(0,10), c=normTexto(i.cat);
+  const hoy=fechaISO(hoyISO()), c=normTexto(i.cat);
   const o=OFERTAS.find(x=>normTexto(x.cat)===c &&
-    (!x.inicia || x.inicia.slice(0,10)<=hoy) && (!x.termina || x.termina.slice(0,10)>=hoy));
+    (!x.inicia || fechaISO(x.inicia)<=hoy) && (!x.termina || fechaISO(x.termina)>=hoy));
   return o? (o.desc||0) : 0;
 }
 /* Precio al cliente de mostrador: Precio 1, menos descuento, más IVA. */
@@ -1460,7 +1474,7 @@ async function editar(clave){
       <div><span>Lista 2</span><b>${i.p2>0?pesos(conIva(i.p2)):"—"}</b><small>${i.p2>0?pesos(i.p2)+" + IVA":""}</small></div>
       <div><span>Lista 3</span><b>${i.p3>0?pesos(conIva(i.p3)):"—"}</b><small>${i.p3>0?pesos(i.p3)+" + IVA":""}</small></div>
     </div>
-    <p class="nota-precio">Precios y ofertas se actualizan solo desde SAIT. Última carga: ${esc((i.act||"").slice(0,10)||"—")}${
+    <p class="nota-precio">Precios y ofertas se actualizan solo desde SAIT. Última carga: ${esc(fechaCorta(i.act)||"—")}${
       i.cat?` · categoría ${esc(i.cat)}`:""}</p>
     <label class="lbl">Ubicación principal</label>
     <div class="grid3">
@@ -1578,8 +1592,8 @@ $("#archivo").onchange = async e=>{
       }
       if(!lista.length) throw new Error("No encontré filas de promociones en el archivo.");
       filasImport={ofertas:lista};
-      const hoy=hoyISO().slice(0,10);
-      const vig=lista.filter(o=>(!o.inicia||o.inicia.slice(0,10)<=hoy)&&(!o.termina||o.termina.slice(0,10)>=hoy));
+      const hoy=fechaISO(hoyISO());
+      const vig=lista.filter(o=>(!o.inicia||fechaISO(o.inicia)<=hoy)&&(!o.termina||fechaISO(o.termina)>=hoy));
       $("#prev-import").innerHTML=`<div class="aviso bien">
         <b>Archivo de promociones.</b><br>
         ${lista.length} ofertas · ${vig.length} vigentes hoy<br>
@@ -1698,10 +1712,10 @@ $("#nuevo-apa").onclick = elegirPieza;
 /* Diagnóstico: dice exactamente qué archivo faltó, en vez de dejarte adivinar */
 $("#btn-diag").onclick = async ()=>{
   await cargarOfertas();
-  const hoy=hoyISO().slice(0,10);
+  const hoy=fechaISO(hoyISO());
   const conPrecio=ITEMS.filter(i=>i.p1>0).length;
   const conCat=ITEMS.filter(i=>i.cat).length;
-  const vig=OFERTAS.filter(o=>(!o.inicia||o.inicia.slice(0,10)<=hoy)&&(!o.termina||o.termina.slice(0,10)>=hoy));
+  const vig=OFERTAS.filter(o=>(!o.inicia||fechaISO(o.inicia)<=hoy)&&(!o.termina||fechaISO(o.termina)>=hoy));
   const conDesc=ITEMS.filter(i=>descuentoDe(i)>0).length;
   const fila=(t,v,ok)=>`<div class="diag ${ok?'ok':'mal'}"><span>${t}</span><b>${v}</b></div>`;
   $("#diagnostico").innerHTML =
@@ -1719,25 +1733,25 @@ $("#btn-diag").onclick = async ()=>{
 $("#exp-apartados").onclick = async ()=>{
   const a=await cargarApartados();
   if(!a.length){ aviso("Todavía no hay apartados ni pedidos registrados."); return; }
-  const filas=a.map(x=>({ Fecha:(x.fecha||"").slice(0,10), Tipo:x.tipo, Estado:x.estado,
+  const filas=a.map(x=>({ Fecha:fechaISO(x.fecha), Tipo:x.tipo, Estado:x.estado,
     Clave:x.clave||"", Descripcion:x.desc||"", Piezas:x.cant||1,
     Folio:x.folio||"", Total:x.total||0, Abonado:abonado(x), Saldo:saldoDe(x), Abonos:(x.abonos||[]).length,
     Cliente:x.cliente||"", WhatsApp:x.tel||"", Tomo:x.quien||"", Notas:x.notas||"",
-    Vence:(x.vence||"").slice(0,10), Cierre:(x.fechaCierre||"").slice(0,10) }));
+    Vence:fechaISO(x.vence), Cierre:fechaISO(x.fechaCierre) }));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), "Apartados");
-  XLSX.writeFile(wb, `apartados_motopro_${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.writeFile(wb, `apartados_motopro_${fechaISO(hoyISO())}.xlsx`);
 };
 
 $("#exp-negadas").onclick = async ()=>{
   const n=await cargarNegadas();
   if(!n.length){ aviso("Todavía no hay ventas negadas registradas."); return; }
-  const filas=n.map(x=>({ Fecha:(x.fecha||"").slice(0,10), Hora:(x.fecha||"").slice(11,16),
+  const filas=n.map(x=>({ Fecha:fechaISO(x.fecha), Hora:horaCorta(x.fecha),
     Clave:x.clave||"", Descripcion:x.desc||"", Piezas:x.cant||1, Motivo:x.motivo||"", Quien:x.quien||"",
     Cliente:x.nombre||"", WhatsApp:x.tel||"", Avisado:x.avisado?"si":"no" }));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), "Negadas");
-  XLSX.writeFile(wb, `ventas_negadas_${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.writeFile(wb, `ventas_negadas_${fechaISO(hoyISO())}.xlsx`);
 };
 
 $("#btn-export").onclick = ()=>{
@@ -1747,11 +1761,11 @@ $("#btn-export").onclick = ()=>{
     "Precio 2":i.p2||0, "Precio 3":i.p3||0,
     "Ubicacion 1":i.u1||"", "Ubicacion 2":i.u2||"", "Ubicacion 3":i.u3||"",
     "Alt 1":i.b1||"", "Alt 2":i.b2||"", "Alt 3":i.b3||"",
-    "Codigo barras":i.cb||"", Observaciones:i.obs||"", Actualizado:i.act||""
+    "Codigo barras":i.cb||"", Observaciones:i.obs||"", Actualizado:fechaISO(i.act)
   }));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), "Ubicaciones");
-  XLSX.writeFile(wb, `ubicaciones_motopro_${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.writeFile(wb, `ubicaciones_motopro_${fechaISO(hoyISO())}.xlsx`);
 };
 </script>
 </body>
