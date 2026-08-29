@@ -215,6 +215,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .estado-llego{font-family:Oswald;font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--verde)}
 .estado-espera{font-family:Oswald;font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--tinta-2)}
 .exist em{font-style:normal;font-size:11px;color:var(--tinta-2);font-weight:400}
+.exist.repetida{background:var(--rojo);color:#fff;border-radius:3px;padding:2px 7px}
+.exist.repetida b{color:#fff}
 .reservado{margin-top:8px;font-size:12px;font-weight:600;color:#7A5400;background:var(--ambar-claro);
   border-radius:4px;padding:6px 9px;display:inline-block}
 .ficha.venc{border-left-color:var(--rojo);background:#FDECEA}
@@ -345,6 +347,11 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <button class="chip on" data-dias="30">30 días</button>
     <button class="chip" data-dias="90">90 días</button>
     <button class="chip" data-dias="9999">Todo</button>
+  </div>
+  <div class="filtros">
+    <span class="etiq-fila">Ordenar</span>
+    <button class="chip on" data-ord="fecha">Más recientes</button>
+    <button class="chip" data-ord="demanda">Más pedidas</button>
   </div>
   <div class="resumen" id="resumen-n"></div>
   <div id="lista-negadas"><div class="cargando">Cargando…</div></div>
@@ -570,6 +577,10 @@ $$("[data-dias]").forEach(b=>b.onclick=()=>{
   $$("[data-dias]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   diasNeg=+b.dataset.dias; pintarNegadas();
 });
+$$("[data-ord]").forEach(b=>b.onclick=()=>{
+  $$("[data-ord]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  ordNeg=b.dataset.ord; pintarNegadas();
+});
 
 let tmr; $("#q").addEventListener("input",()=>{clearTimeout(tmr);tmr=setTimeout(pintar,110)});
 
@@ -581,7 +592,7 @@ const pendientes = () => ITEMS.filter(i=>!tieneUbic(i) && (i.exist||0)>0)
 /* ============ VENTAS NEGADAS ============
    Lo que el cliente pidió y no se le pudo vender. Es el único dato que SAIT
    nunca va a tener, porque es la venta que no ocurrió.                      */
-let NEGADAS=null, diasNeg=30, ultimoQuien="";
+let NEGADAS=null, diasNeg=30, ordNeg="fecha", ultimoQuien="";
 
 async function registrarNegada({clave,texto}){
   const i = clave? porClave.get(clave) : null;
@@ -1073,7 +1084,9 @@ async function pintarNegadas(){
     const o=g.get(k); o.veces++; o.piezas+=(x.cant||1);
     if((x.fecha||"")>o.ultima) o.ultima=x.fecha;
   });
-  const orden=[...g.values()].sort((a,b)=>b.veces-a.veces || b.piezas-a.piezas || (b.ultima||"").localeCompare(a.ultima||""));
+  const orden=[...g.values()].sort(ordNeg==="demanda"
+    ? (a,b)=>b.veces-a.veces || b.piezas-a.piezas || (b.ultima||"").localeCompare(a.ultima||"")
+    : (a,b)=>(b.ultima||"").localeCompare(a.ultima||""));
   const enCat=orden.filter(o=>o.clave), fuera=orden.filter(o=>!o.clave);
   $("#resumen-n").textContent=`${r.length} registros · ${r.reduce((s,x)=>s+(x.cant||1),0)} piezas perdidas`;
 
@@ -1082,7 +1095,7 @@ async function pintarNegadas(){
     return `<div class="ficha">
       <div class="ficha-top">
         <span class="clave">${esc(o.clave||"— sin clave —")}</span>
-        <span class="exist"><b>${o.piezas}</b> pz · ${o.veces} vez${o.veces===1?"":"es"}</span>
+        <span class="exist ${o.veces>1?'repetida':''}"><b>${o.piezas}</b> pz · ${o.veces} vez${o.veces===1?"":"es"}</span>
       </div>
       <div class="desc">${esc(o.desc||"—")}</div>
       ${it?`<div class="tags">${etiqueta(it.u1,it.u2,it.u3)}
@@ -1185,7 +1198,7 @@ function pintarBuscar(){
         (prev.length?`<h3 class="sec-tit">Ya te habían pedido algo parecido</h3>
           <div class="lista">${prev.map(o=>`<div class="ficha">
             <div class="ficha-top"><span class="clave">— sin clave —</span>
-            <span class="exist"><b>${o.piezas}</b> pz · ${o.veces} vez${o.veces===1?"":"es"}</span></div>
+            <span class="exist ${o.veces>1?'repetida':''}"><b>${o.piezas}</b> pz · ${o.veces} vez${o.veces===1?"":"es"}</span></div>
             <div class="desc">${esc(o.desc)}</div>
             <div class="mini-dato">última: ${esc(fechaCorta(o.ultima))} ${esc(horaCorta(o.ultima))}</div></div>`).join("")}</div>`:"");
       })();
