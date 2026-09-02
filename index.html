@@ -323,6 +323,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
   <button class="tab on" data-t="buscar">Buscar</button>
   <button class="tab" data-t="mapa">Almacén</button>
   <button class="tab" data-t="pend">Sin ubicar<span class="num" id="n-pend">0</span></button>
+  <button class="tab" data-t="ventas">Ventas</button>
   <button class="tab" data-t="apartados">Apartados<span class="num" id="n-apa">0</span></button>
   <button class="tab" data-t="negadas">Negadas</button>
   <button class="tab" data-t="admin">Sincronizar</button>
@@ -361,6 +362,17 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 <div class="panel oculto" id="p-pend">
   <div class="resumen" id="resumen-p"></div>
   <div class="lista" id="lista-pend"></div>
+</div>
+
+<!-- VENTAS -->
+<div class="panel oculto" id="p-ventas">
+  <div class="filtros">
+    <button class="chip" data-dv="7">7 días</button>
+    <button class="chip on" data-dv="30">30 días</button>
+    <button class="chip" data-dv="90">90 días</button>
+  </div>
+  <div class="resumen" id="resumen-v"></div>
+  <div id="lista-ventas"><div class="cargando">Cargando…</div></div>
 </div>
 
 <!-- APARTADOS -->
@@ -437,6 +449,7 @@ const COL_THUMBS = "motopro_thumbs";
 const COL_NEGADAS = "motopro_negadas";
 const COL_APARTADOS = "motopro_apartados";
 const COL_CONFIG = "motopro_config";
+const COL_VENTAS = "motopro_ventas";
 const CLAVE_ADMIN = "motopro2026";   // <-- cámbiala por la que quieras
 const IVA = 0.16;                     // Precio 1 viene sin IVA en SAIT
 
@@ -598,12 +611,16 @@ async function recargar(){
 $$(".tab").forEach(b=>b.onclick=()=>{
   $$(".tab").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   pestana=b.dataset.t;
-  ["buscar","mapa","pend","apartados","negadas","admin"].forEach(t=>$("#p-"+t).classList.toggle("oculto",t!==pestana));
+  ["buscar","mapa","pend","ventas","apartados","negadas","admin"].forEach(t=>$("#p-"+t).classList.toggle("oculto",t!==pestana));
   pintar();
 });
 $$("[data-f]").forEach(b=>b.onclick=()=>{
   $$("[data-f]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   filtro=b.dataset.f; pintar();
+});
+$$("[data-dv]").forEach(b=>b.onclick=()=>{
+  $$("[data-dv]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  diasVta=+b.dataset.dv; pintarVentas();
 });
 $$("[data-dias]").forEach(b=>b.onclick=()=>{
   $$("[data-dias]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
@@ -620,6 +637,93 @@ let tmr; $("#q").addEventListener("input",()=>{clearTimeout(tmr);catSel="";tmr=s
 const tieneUbic = i => !!(i.u1);
 const pendientes = () => ITEMS.filter(i=>!tieneUbic(i) && (i.exist||0)>0)
                              .sort((a,b)=>(b.exist||0)-(a.exist||0));
+
+/* ============ VENTAS ============
+   Cada archivo diario de SAIT se guarda como un documento por fecha. Con
+   varios días acumulados se puede calcular velocidad de venta, y de ahí
+   cuántos días de inventario queda y qué no se ha movido.
+   NOTA: las ventas NO descuentan existencias. La existencia sigue viniendo
+   de la sincronización de SAIT, que es la única que conoce las entradas.  */
+let VENTAS=null, diasVta=30;
+
+async function cargarVentas(){
+  if(VENTAS) return VENTAS;
+  try{
+    const s=await getDocs(collection(db,COL_VENTAS));
+    VENTAS=s.docs.map(d=>({fecha:d.id,...d.data()})).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+  }catch(e){ VENTAS=[]; }
+  return VENTAS;
+}
+/* Acumulado por clave dentro del período, con velocidad diaria */
+function acumVentas(dias){
+  const corte=fechaISO(new Date(Date.now()-dias*864e5).toISOString());
+  const usados=(VENTAS||[]).filter(d=>d.fecha>=corte);
+  const g=new Map();
+  usados.forEach(d=>(d.lineas||[]).forEach(l=>{
+    if(!g.has(l.clave)) g.set(l.clave,{clave:l.clave,desc:l.desc,cant:0,venta:0,costo:0,dias:new Set()});
+    const o=g.get(l.clave);
+    o.cant+=l.cant||0; o.venta+=l.venta||0; o.costo+=l.costo||0; o.dias.add(d.fecha);
+  }));
+  const n=usados.length||1;
+  g.forEach(o=>{ o.porDia=o.cant/n; o.margen=o.venta-o.costo; });
+  return {g, diasConDatos:usados.length,
+          tot:usados.reduce((s,d)=>({cant:s.cant+(d.tot?.cant||0), venta:s.venta+(d.tot?.venta||0), costo:s.costo+(d.tot?.costo||0)}),{cant:0,venta:0,costo:0})};
+}
+
+async function pintarVentas(){
+  await cargarVentas();
+  if(!VENTAS.length){
+    $("#resumen-v").textContent="";
+    $("#lista-ventas").innerHTML=`<div class="vacio-msg"><div class="grande">Sin ventas cargadas</div>
+      Sube el reporte diario de SAIT en Sincronizar. Con varios días se calcula la rotación.</div>`;
+    return;
+  }
+  const {g,diasConDatos,tot}=acumVentas(diasVta);
+  const margen=tot.venta-tot.costo;
+  $("#resumen-v").innerHTML=`<span>${diasConDatos} día(s) con datos · ${tot.cant} pz · ${pesos(tot.venta)} · margen ${pesos(margen)} (${tot.venta?Math.round(margen/tot.venta*100):0}%)</span>`;
+
+  const lista=[...g.values()];
+  const masVend=[...lista].sort((a,b)=>b.cant-a.cant).slice(0,15);
+  // Por reponer: se vende y quedan pocos días de inventario
+  const reponer=lista.map(o=>{
+    const i=porClave.get(o.clave); if(!i) return null;
+    const disp=disponible(i);
+    return {...o, disp, diasRest: o.porDia>0? disp/o.porDia : 999, i};
+  }).filter(o=>o&&o.diasRest<21).sort((a,b)=>a.diasRest-b.diasRest);
+  // Sin movimiento: hay existencia pero no se vendió nada en el período
+  const quietos=ITEMS.filter(i=>(i.exist||0)>0 && !g.has(i.clave))
+    .sort((a,b)=>(b.exist||0)*(b.p1||0)-(a.exist||0)*(a.p1||0)).slice(0,20);
+
+  const fV=o=>{
+    const i=porClave.get(o.clave);
+    return `<div class="ficha">
+      <div class="ficha-top"><span class="clave">${esc(o.clave)}</span>
+        <span class="exist"><b>${o.cant}</b> pz vendidas</span></div>
+      <div class="desc">${esc(o.desc||i?.desc||"")}</div>
+      <div class="dinero"><span>Venta ${pesos(o.venta)}</span><span>Costo ${pesos(o.costo)}</span>
+        <span class="${o.margen>0?'pagado':'debe'}">Margen ${pesos(o.margen)}${o.venta?` · ${Math.round(o.margen/o.venta*100)}%`:""}</span></div>
+      <div class="mini-dato">${i?`quedan ${disponible(i)} pz`:"no está en el catálogo"} · ${o.porDia.toFixed(1)} pz/día</div>
+    </div>`;
+  };
+  const fR=o=>`<div class="ficha ${o.diasRest<7?'venc':''}">
+      <div class="ficha-top"><span class="clave">${esc(o.clave)}</span>
+        <span class="exist ${o.diasRest<7?'repetida':''}"><b>${Math.floor(o.diasRest)}</b> días</span></div>
+      <div class="desc">${esc(o.desc||"")}</div>
+      <div class="mini-dato">quedan ${o.disp} pz · vende ${o.porDia.toFixed(1)} pz/día${
+        vecesPedida(o.clave)?` · te la pidieron ${vecesPedida(o.clave)} vez(es)`:""}</div>
+    </div>`;
+  const fQ=i=>`<div class="ficha">
+      <div class="ficha-top"><span class="clave">${esc(i.clave)}</span>
+        <span class="exist"><b>${i.exist}</b> pz paradas</span></div>
+      <div class="desc">${esc(i.desc||"")}</div>
+      <div class="mini-dato">${i.p1?`${pesos(conIva(i.p1)*i.exist)} detenidos`:""} ${i.u1?"· "+esc(i.u1):""}</div>
+    </div>`;
+  const bl=(t,l,f,c)=>l.length?`<h3 class="sec-tit ${c||""}">${t} (${l.length})</h3><div class="lista">${l.map(f).join("")}</div>`:"";
+  $("#lista-ventas").innerHTML =
+    bl("Reponer pronto — menos de 3 semanas de inventario",reponer.slice(0,20),fR,"rojo")+
+    bl("Más vendidos",masVend,fV)+
+    bl(`Sin movimiento en ${diasVta} días — dinero detenido`,quietos,fQ,"");
+}
 
 /* ============ VENTAS NEGADAS ============
    Lo que el cliente pidió y no se le pudo vender. Es el único dato que SAIT
@@ -1186,6 +1290,7 @@ function pintar(){
   if(pestana==="buscar") pintarBuscar();
   if(pestana==="mapa")   pintarMapa();
   if(pestana==="pend")   pintarPend();
+  if(pestana==="ventas") pintarVentas();
   if(pestana==="apartados") pintarApartados();
   if(pestana==="negadas") pintarNegadas();
 }
@@ -1723,6 +1828,40 @@ $("#archivo").onchange = async e=>{
         Aplican por categoría al precio de mostrador.</div>`;
       $("#btn-import").disabled=false; return;
     }
+    // ¿Es el reporte diario de ventas? Trae CANTIDAD y COSTO junto a CLAVE.
+    let hVt=-1;
+    for(let r=0;r<Math.min(20,bruto.length);r++){
+      const f2=(bruto[r]||[]).map(c=>normTexto(c));
+      if(f2.includes("CLAVE") && f2.includes("CANTIDAD") && f2.includes("COSTO")){ hVt=r; break; }
+    }
+    if(hVt>=0){
+      const cb=(bruto[hVt]||[]).map(c=>normTexto(c));
+      const iC2=cb.indexOf("CLAVE"), iN=cb.indexOf("NOMBRE"), iQ=cb.indexOf("CANTIDAD"),
+            iS=cb.indexOf("SUBTOTAL"), iK=cb.indexOf("COSTO"), iDv=cb.indexOf("DEVOL");
+      const lineas=[];
+      for(let r=hVt+1;r<bruto.length;r++){
+        const f2=bruto[r]||[]; const cl=String(f2[iC2]??"").trim();
+        if(!cl || cl.toUpperCase()==="NAN") continue;
+        const cant=(Number(f2[iQ])||0)-(iDv>=0?(Number(f2[iDv])||0):0);
+        lineas.push({clave:cl, desc:iN>=0?String(f2[iN]??"").trim():"",
+          cant, venta:iS>=0?(Number(f2[iS])||0):0, costo:iK>=0?(Number(f2[iK])||0):0});
+      }
+      if(!lineas.length) throw new Error("No encontré líneas de venta en el archivo.");
+      const ayer=fechaISO(new Date(Date.now()-864e5).toISOString());
+      const tot=lineas.reduce((s,l)=>({cant:s.cant+l.cant,venta:s.venta+l.venta,costo:s.costo+l.costo}),{cant:0,venta:0,costo:0});
+      const fuera=lineas.filter(l=>!porClave.has(l.clave)).length;
+      filasImport={ventas:{lineas,tot}};
+      $("#prev-import").innerHTML=`<div class="aviso bien">
+        <b>Reporte de ventas.</b><br>
+        ${lineas.length} artículos · ${tot.cant} piezas · ${pesos(tot.venta)} de venta<br>
+        Margen ${pesos(tot.venta-tot.costo)} (${tot.venta?Math.round((tot.venta-tot.costo)/tot.venta*100):0}%)
+        ${fuera?`<br>${fuera} clave(s) no están en el catálogo — sincroniza existencias después.`:""}
+        </div>
+        <label class="lbl">¿De qué día son estas ventas?</label>
+        <input type="date" id="fecha-vta" value="${ayer}">
+        <p class="nota-precio">El archivo de SAIT no trae la fecha. Si vuelves a subir el mismo día, se reemplaza.</p>`;
+      $("#btn-import").disabled=false; return;
+    }
     if(hi<0) throw new Error("No encontré una columna llamada 'Clave' en las primeras 20 filas.");
     const cab = (bruto[hi]||[]).map(c=>limpiar(c));
     const col = n => cab.findIndex(c=>c===n);
@@ -1784,6 +1923,16 @@ $("#btn-import").onclick = async ()=>{
   if(!filasImport) return;
   if(!esAdmin && !(await pedirClave())) return;
   const b=$("#btn-import"); b.disabled=true;
+  if(filasImport.ventas){
+    const f=$("#fecha-vta").value;
+    if(!f){ aviso("Elige la fecha de las ventas."); b.disabled=false; return; }
+    try{
+      await setDoc(doc(db,COL_VENTAS,f),{...filasImport.ventas,act:hoyISO()});
+      VENTAS=null; await cargarVentas();
+      $("#prev-import").innerHTML=`<div class="aviso bien"><b>Ventas del ${fechaCorta(f+"T12:00:00")} guardadas.</b> Revisa la pestaña Ventas.</div>`;
+    }catch(e){ $("#prev-import").innerHTML=`<div class="aviso malo">${esc(e.message)}</div>`; }
+    b.disabled=false; return;
+  }
   if(filasImport.ofertas){
     try{
       await setDoc(doc(db,COL_CONFIG,"ofertas"),{lista:filasImport.ofertas,act:hoyISO()});
