@@ -220,6 +220,34 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .reservado{margin-top:8px;font-size:12px;font-weight:600;color:#7A5400;background:var(--ambar-claro);
   border-radius:4px;padding:6px 9px;display:inline-block}
 .ficha.venc{border-left-color:var(--rojo);background:#FDECEA}
+
+/* ---------- Tarjeta con miniatura ---------- */
+.ficha.con-foto{display:flex;gap:12px;align-items:flex-start}
+.ficha.con-foto .cuerpo{flex:1;min-width:0}
+.thumb{flex:none;width:72px;height:72px;border-radius:5px;background:var(--concreto-2);
+  display:grid;place-items:center;overflow:hidden}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb.vacia::after{content:"";width:26px;height:20px;border:2px solid var(--linea);border-radius:3px}
+.vista-cli.on{background:var(--verde);color:#fff;border-color:var(--verde)}
+
+/* ---------- Vista para el monitor del cliente ---------- */
+.modo-cliente .interno{display:none !important}
+.modo-cliente .ficha.con-foto{gap:18px;padding:15px}
+.modo-cliente .thumb{width:150px;height:150px;border-radius:7px}
+.modo-cliente .desc{font-size:18px;font-weight:600;color:var(--tinta);line-height:1.3;margin:2px 0 10px}
+.modo-cliente .precio{font-size:30px}
+.modo-cliente .antes{font-size:17px}
+.modo-cliente .badge-of{font-size:13px;padding:4px 8px}
+.modo-cliente .exist{font-family:Oswald;font-size:13px;letter-spacing:.07em;text-transform:uppercase}
+.modo-cliente .exist.cero{color:var(--tinta-2)}
+.modo-cliente .motos-fila{margin-top:10px}
+.modo-cliente .moto-tag{font-size:12px;padding:4px 8px}
+.modo-cliente .renglon-precio .btn-mini{display:none}
+@media(max-width:520px){
+  .modo-cliente .thumb{width:96px;height:96px}
+  .modo-cliente .desc{font-size:15px}
+  .modo-cliente .precio{font-size:24px}
+}
 .tipos{display:flex;gap:8px;margin:12px 0 4px}
 .tipo-b{flex:1;border:1px solid var(--linea);background:var(--superficie);border-radius:4px;padding:11px 8px;
   font-family:Oswald;font-size:15px;letter-spacing:.05em;text-transform:uppercase}
@@ -266,6 +294,11 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .oferta-chip b{font-family:'JetBrains Mono';font-size:10px;opacity:.7;margin-left:3px}
 .oferta-chip.on{background:var(--verde);color:#fff;border-color:var(--verde)}
 .chip.tipo{font-family:Oswald;letter-spacing:.05em;font-size:12px}
+.chip.tipo.aviso-chip{border-color:var(--ambar);color:#7A5400}
+.chip.tipo.aviso-chip.on{background:var(--ambar);color:#fff}
+#tipos{flex-wrap:nowrap}
+.cat-tag{display:inline-block;margin-top:7px;font-family:Oswald;font-size:10.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--tinta-2);border:1px solid var(--linea);border-radius:3px;padding:2px 7px}
 .chip.tipo b,.chip.moto b{font-family:'JetBrains Mono';font-size:10px;opacity:.6;margin-left:3px}
 .chip.moto{font-family:'JetBrains Mono';font-size:11.5px;font-weight:700;border-color:var(--azul);color:var(--azul)}
 .chip.moto.on{background:var(--azul);color:#fff;border-color:var(--azul)}
@@ -317,6 +350,11 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
   </div>
   <div class="filtros" id="tipos"></div>
   <div class="filtros" id="motos"></div>
+  <div class="filtros">
+    <span class="etiq-fila">Pantalla</span>
+    <button class="chip on" data-vista="normal">Mostrador</button>
+    <button class="chip vista-cli" data-vista="cliente">Cliente</button>
+  </div>
   <div id="resumen-b" class="resumen"></div>
   <div class="lista" id="res"></div>
 </div>
@@ -403,6 +441,7 @@ const CONFIG_FIREBASE = {
 };
 const COLECCION = "motopro_ubicaciones";
 const COL_FOTOS = "motopro_fotos";
+const COL_THUMBS = "motopro_thumbs";
 const COL_NEGADAS = "motopro_negadas";
 const COL_APARTADOS = "motopro_apartados";
 const COL_CONFIG = "motopro_config";
@@ -521,6 +560,7 @@ function coincide(i,t){
 
 /* ============ ESTADO ============ */
 let db, ITEMS=[], porClave=new Map(), esAdmin=false, filtro="todo", pestana="buscar";
+let VISTA_CLIENTE=false, catSel="";
 let filasImport=null;
 
 const $  = s => document.querySelector(s);
@@ -577,12 +617,18 @@ $$("[data-dias]").forEach(b=>b.onclick=()=>{
   $$("[data-dias]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   diasNeg=+b.dataset.dias; pintarNegadas();
 });
+$$("[data-vista]").forEach(b=>b.onclick=()=>{
+  $$("[data-vista]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  VISTA_CLIENTE = b.dataset.vista==="cliente";
+  document.body.classList.toggle("modo-cliente",VISTA_CLIENTE);
+  pintarBuscar();
+});
 $$("[data-ord]").forEach(b=>b.onclick=()=>{
   $$("[data-ord]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   ordNeg=b.dataset.ord; pintarNegadas();
 });
 
-let tmr; $("#q").addEventListener("input",()=>{clearTimeout(tmr);tmr=setTimeout(pintar,110)});
+let tmr; $("#q").addEventListener("input",()=>{clearTimeout(tmr);catSel="";tmr=setTimeout(pintar,110)});
 
 /* ============ RENDER ============ */
 const tieneUbic = i => !!(i.u1);
@@ -1124,25 +1170,26 @@ function pintarMotos(){
   $("#motos").innerHTML = `<span class="etiq-fila">Motos</span>`+top.map(([m,n])=>
     `<button class="chip moto" data-moto="${esc(m)}">${esc(m)} <b>${n}</b></button>`).join("");
   $$("[data-moto]").forEach(b=>b.onclick=()=>{
+    catSel="";
     const ya = normTexto($("#q").value)===normTexto(b.dataset.moto);
     $("#q").value = ya ? "" : b.dataset.moto;
     pintarBuscar();
   });
 }
 
+/* Chips de categoría: usan la categoría real de SAIT, no una palabra sacada
+   de la descripción. Se filtra por el campo, no por texto, así "CASCO L" no
+   arrastra artículos que solo mencionan la letra L en su descripción.      */
 function pintarTipos(){
   const c=new Map();
-  ITEMS.forEach(i=>{
-    const p=normTexto(i.desc||"").split(" ")[0];
-    if(p && p.length>2 && !/^\d/.test(p)) c.set(p,(c.get(p)||0)+1);
-  });
-  const top=[...c.entries()].sort((a,b)=>b[1]-a[1]).slice(0,14);
-  $("#tipos").innerHTML = top.map(([p,n])=>
-    `<button class="chip tipo" data-tipo="${esc(p)}">${esc(p)} <b>${n}</b></button>`).join("");
+  ITEMS.forEach(i=>{ if(i.cat) c.set(i.cat,(c.get(i.cat)||0)+1); });
+  const top=[...c.entries()].sort((a,b)=>b[1]-a[1]);
+  const sinCat=ITEMS.filter(i=>!i.cat).length;
+  $("#tipos").innerHTML = `<span class="etiq-fila">Categorías</span>`+
+    top.map(([p,n])=>`<button class="chip tipo" data-tipo="${esc(p)}">${esc(p)} <b>${n}</b></button>`).join("")+
+    (sinCat?`<button class="chip tipo aviso-chip" data-tipo="__SIN__">Sin categoría <b>${sinCat}</b></button>`:"");
   $$("[data-tipo]").forEach(b=>b.onclick=()=>{
-    const ya = normTexto($("#q").value)===b.dataset.tipo;
-    $("#q").value = ya ? "" : b.dataset.tipo;
-    $$(".chip.tipo").forEach(x=>x.classList.toggle("on", !ya && x===b));
+    catSel = (catSel===b.dataset.tipo)? "" : b.dataset.tipo;
     pintarBuscar();
   });
 }
@@ -1164,6 +1211,7 @@ function pintarBuscar(){
   if(filtro==="conex") r = r.filter(i=>(i.exist||0)>0);
   if(filtro==="sinub") r = r.filter(i=>!tieneUbic(i));
   if(filtro==="oferta") r = r.filter(i=>descuentoDe(i)>0);
+  if(catSel) r = (catSel==="__SIN__") ? r.filter(i=>!i.cat) : r.filter(i=>i.cat===catSel);
   if(terminos.length) r = r.filter(i=>terminos.every(t=>coincide(i,t)));
   else if(filtro==="oferta"){
     r.sort((a,b)=>disponible(b)-disponible(a) || a.clave.localeCompare(b.clave));
@@ -1173,6 +1221,16 @@ function pintarBuscar(){
       : `<div class="vacio-msg"><div class="grande">Sin ofertas vigentes</div>Sube el archivo de promociones en Sincronizar.</div>`;
     if(r.length>250) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando 250 de ${r.length}.</div>`);
     enlazarBotones();
+    return;
+  }
+  else if(catSel){
+    r.sort((a,b)=>disponible(b)-disponible(a) || a.clave.localeCompare(b.clave));
+    $$(".chip.tipo").forEach(x=>x.classList.toggle("on", x.dataset.tipo===catSel));
+    $$(".chip.moto").forEach(x=>x.classList.remove("on"));
+    $("#resumen-b").innerHTML=`<span>${r.length} en ${esc(catSel==="__SIN__"?"sin categoría":catSel)}</span>`;
+    $("#res").innerHTML = r.slice(0,250).map(ficha).join("");
+    if(r.length>250) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando 250 de ${r.length}.</div>`);
+    enlazarBotones(); observarThumbs();
     return;
   }
   else if(filtro==="todo"){
@@ -1185,7 +1243,7 @@ function pintarBuscar(){
     if(ea!==eb) return ea?-1:1;
     return a.clave.localeCompare(b.clave);
   });
-  $$(".chip.tipo").forEach(x=>x.classList.toggle("on", x.dataset.tipo===q));
+  $$(".chip.tipo").forEach(x=>x.classList.remove("on"));
   $$(".chip.moto").forEach(x=>x.classList.toggle("on", normTexto(x.dataset.moto)===q));
   $("#resumen-b").innerHTML = `<span>${r.length} resultado${r.length===1?"":"s"}</span>`+
     (terminos.length?`<button class="btn-mini negada" id="neg-libre2">No es lo que pedía</button>`:"");
@@ -1203,7 +1261,7 @@ function pintarBuscar(){
             <div class="mini-dato">última: ${esc(fechaCorta(o.ultima))} ${esc(horaCorta(o.ultima))}</div></div>`).join("")}</div>`:"");
       })();
   if(r.length>250) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando 250 de ${r.length}. Afina la búsqueda.</div>`);
-  enlazarBotones();
+  enlazarBotones(); observarThumbs();
   const bLibre = $("#neg-libre") || $("#neg-libre2");
   if(bLibre) bLibre.onclick=()=>registrarNegada({texto:$("#q").value.trim()});
 }
@@ -1257,29 +1315,35 @@ function precioHtml(i){
 function ficha(i){
   const res=reservadas(i.clave), disp=disponible(i);
   const cero=disp<=0;
-  return `<div class="ficha ${!tieneUbic(i)&&!cero?'pend':''}">
+  return `<div class="ficha con-foto ${!tieneUbic(i)&&!cero?'pend':''}">
+    <div class="thumb" data-thumb="${esc(i.clave)}"></div>
+    <div class="cuerpo">
     <div class="ficha-top">
-      <span class="clave">${esc(i.clave)}</span>
-      <span class="exist ${cero?'cero':''}"><b>${disp}</b> pz${res?` <em>de ${i.exist}</em>`:""}</span>
+      <span class="clave interno">${esc(i.clave)}</span>
+      <span class="exist ${cero?'cero':''}">${VISTA_CLIENTE
+        ? (disp>0?"Disponible":"Sin existencia")
+        : `<b>${disp}</b> pz${res?` <em>de ${i.exist}</em>`:""}`}</span>
     </div>
     <div class="desc">${esc(i.desc||"—")}</div>
     <div class="renglon-precio">
       ${precioHtml(i)}
       <button class="btn-mini destacado" data-mostrador="${esc(i.clave)}">Mostrar al cliente</button>
     </div>
-    <div class="tags">
+    <div class="tags interno">
       ${etiqueta(i.u1,i.u2,i.u3)}
       ${i.b1?etiqueta(i.b1,i.b2,i.b3,true):""}
       <button class="btn-mini" data-editar="${esc(i.clave)}">${tieneUbic(i)?"Cambiar":"Ubicar"}</button>
       ${cero?`<button class="btn-mini negada" data-negada="${esc(i.clave)}">Me la pidieron</button>`
             :`<button class="btn-mini" data-apartar="${esc(i.clave)}">Apartar</button>`}
     </div>
-    ${res?`<div class="reservado">${res} pz apartada${res===1?"":"s"} — no vendibles</div>`:""}
+    ${res?`<div class="reservado interno">${res} pz apartada${res===1?"":"s"} — no vendibles</div>`:""}
+    ${i.cat?`<div class="cat-tag interno">${esc(i.cat)}</div>`:""}
     ${(i._modelos||[]).length?`<div class="motos-fila">${i._modelos.slice(0,8).map(m=>
       `<button class="moto-tag" data-moto2="${esc(m)}">${esc(m)}</button>`).join("")}${
       i._modelos.length>8?`<span class="mini-dato">+${i._modelos.length-8}</span>`:""}</div>`:""}
-    ${(()=>{const v=vecesPedida(i.clave); return v?`<div class="pedida">Te la han pedido ${v} vez${v===1?"":"es"} en 90 días</div>`:"";})()}
-    ${i.obs?`<div class="obs">${esc(i.obs)}</div>`:""}
+    ${(()=>{const v=vecesPedida(i.clave); return v?`<div class="pedida interno">Te la han pedido ${v} vez${v===1?"":"es"} en 90 días</div>`:"";})()}
+    ${i.obs?`<div class="obs interno">${esc(i.obs)}</div>`:""}
+    </div>
   </div>`;
 }
 
@@ -1331,15 +1395,66 @@ function enlazarBotones(){
     window.scrollTo({top:0,behavior:"smooth"}); });
 }
 
-/* ============ FOTOS ============ */
-const cacheFotos = new Map();
+/* ============ FOTOS ============
+   Se guardan dos tamaños. La grande (900px) para la pantalla del cliente, y
+   una miniatura (260px, ~10 KB) en colección aparte para los resultados de
+   búsqueda: así la lista muestra fotos sin arrastrar megas por consulta.   */
+const cacheFotos = new Map(), cacheThumbs = new Map();
 async function fotoDe(clave){
   if(cacheFotos.has(clave)) return cacheFotos.get(clave);
   try{
     const s = await getDoc(doc(db,COL_FOTOS,idDoc(clave)));
     const img = s.exists()? s.data().img : null;
-    cacheFotos.set(clave,img); return img;
+    cacheFotos.set(clave,img);
+    if(img && !cacheThumbs.get(clave)) migrarThumb(clave,img);   // fotos viejas
+    return img;
   }catch(e){ return null; }
+}
+async function thumbDe(clave){
+  if(cacheThumbs.has(clave)) return cacheThumbs.get(clave);
+  try{
+    const s = await getDoc(doc(db,COL_THUMBS,idDoc(clave)));
+    const img = s.exists()? s.data().img : null;
+    cacheThumbs.set(clave,img); return img;
+  }catch(e){ cacheThumbs.set(clave,null); return null; }
+}
+/* Fotos guardadas antes de que existieran las miniaturas: se genera al vuelo */
+async function migrarThumb(clave,dataUrl){
+  try{
+    const t=await reducir(dataUrl,260,.6);
+    await setDoc(doc(db,COL_THUMBS,idDoc(clave)),{img:t,act:hoyISO()});
+    cacheThumbs.set(clave,t);
+  }catch(e){}
+}
+
+/* Carga las miniaturas solo cuando la tarjeta entra en pantalla */
+let observador=null;
+function observarThumbs(){
+  if(!("IntersectionObserver" in window)) return;
+  if(!observador) observador=new IntersectionObserver(es=>{
+    es.forEach(async e=>{
+      if(!e.isIntersecting) return;
+      const el=e.target; observador.unobserve(el);
+      const img=await thumbDe(el.dataset.thumb);
+      if(img) el.innerHTML=`<img src="${img}" alt="" loading="lazy">`;
+      else el.classList.add("vacia");
+    });
+  },{rootMargin:"200px"});
+  $$("[data-thumb]").forEach(el=>observador.observe(el));
+}
+function reducir(dataUrl, max=900, calidad=.72){
+  return new Promise((res,rej)=>{
+    const im=new Image();
+    im.onload=()=>{
+      let {width:w,height:h}=im;
+      if(w>max||h>max){ const k=max/Math.max(w,h); w=Math.round(w*k); h=Math.round(h*k); }
+      const c=document.createElement("canvas"); c.width=w; c.height=h;
+      c.getContext("2d").drawImage(im,0,0,w,h);
+      res(c.toDataURL("image/jpeg",calidad));
+    };
+    im.onerror=()=>rej(new Error("No se pudo leer la imagen"));
+    im.src=dataUrl;
+  });
 }
 function comprimir(file, max=900, calidad=.72){
   return new Promise((res,rej)=>{
@@ -1359,8 +1474,11 @@ function comprimir(file, max=900, calidad=.72){
   });
 }
 async function guardarFoto(clave,dataUrl){
-  await setDoc(doc(db,COL_FOTOS,idDoc(clave)),{img:dataUrl,act:new Date().toISOString()});
+  await setDoc(doc(db,COL_FOTOS,idDoc(clave)),{img:dataUrl,act:hoyISO()});
   cacheFotos.set(clave,dataUrl);
+  const thumb=await reducir(dataUrl,260,.6);
+  await setDoc(doc(db,COL_THUMBS,idDoc(clave)),{img:thumb,act:hoyISO()});
+  cacheThumbs.set(clave,thumb);
   const it=porClave.get(clave); if(it) it.foto=true;
 }
 
