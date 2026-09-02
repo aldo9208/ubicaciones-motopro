@@ -228,25 +228,22 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
   display:grid;place-items:center;overflow:hidden}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .thumb.vacia::after{content:"";width:26px;height:20px;border:2px solid var(--linea);border-radius:3px}
-.vista-cli.on{background:var(--verde);color:#fff;border-color:var(--verde)}
 
 /* ---------- Vista para el monitor del cliente ---------- */
-.modo-cliente .interno{display:none !important}
-.modo-cliente .ficha.con-foto{gap:18px;padding:15px}
-.modo-cliente .thumb{width:150px;height:150px;border-radius:7px}
-.modo-cliente .desc{font-size:18px;font-weight:600;color:var(--tinta);line-height:1.3;margin:2px 0 10px}
-.modo-cliente .precio{font-size:30px}
-.modo-cliente .antes{font-size:17px}
-.modo-cliente .badge-of{font-size:13px;padding:4px 8px}
-.modo-cliente .exist{font-family:Oswald;font-size:13px;letter-spacing:.07em;text-transform:uppercase}
-.modo-cliente .exist.cero{color:var(--tinta-2)}
-.modo-cliente .motos-fila{margin-top:10px}
-.modo-cliente .moto-tag{font-size:12px;padding:4px 8px}
-.modo-cliente .renglon-precio .btn-mini{display:none}
+
+/* Una sola vista. El monitor espejo la ve completa, así que lo que el cliente
+   debe leer va grande y lo interno queda discreto pero disponible.          */
+.ficha .desc{font-size:16px;font-weight:600;color:var(--tinta);line-height:1.35;margin:2px 0 8px}
+.ficha .precio{font-size:26px}
+.thumb{width:104px;height:104px}
+.clave,.exist{font-size:12px;color:var(--tinta-2);font-weight:600}
+.exist b{font-size:13px}
+.tag{font-size:11px}
+.tag>span{padding:4px 7px}
 @media(max-width:520px){
-  .modo-cliente .thumb{width:96px;height:96px}
-  .modo-cliente .desc{font-size:15px}
-  .modo-cliente .precio{font-size:24px}
+  .thumb{width:76px;height:76px}
+  .ficha .desc{font-size:14.5px}
+  .ficha .precio{font-size:21px}
 }
 .tipos{display:flex;gap:8px;margin:12px 0 4px}
 .tipo-b{flex:1;border:1px solid var(--linea);background:var(--superficie);border-radius:4px;padding:11px 8px;
@@ -350,11 +347,6 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
   </div>
   <div class="filtros" id="tipos"></div>
   <div class="filtros" id="motos"></div>
-  <div class="filtros">
-    <span class="etiq-fila">Pantalla</span>
-    <button class="chip on" data-vista="normal">Mostrador</button>
-    <button class="chip vista-cli" data-vista="cliente">Cliente</button>
-  </div>
   <div id="resumen-b" class="resumen"></div>
   <div class="lista" id="res"></div>
 </div>
@@ -560,7 +552,7 @@ function coincide(i,t){
 
 /* ============ ESTADO ============ */
 let db, ITEMS=[], porClave=new Map(), esAdmin=false, filtro="todo", pestana="buscar";
-let VISTA_CLIENTE=false, catSel="";
+let catSel="";
 let filasImport=null;
 
 const $  = s => document.querySelector(s);
@@ -616,12 +608,6 @@ $$("[data-f]").forEach(b=>b.onclick=()=>{
 $$("[data-dias]").forEach(b=>b.onclick=()=>{
   $$("[data-dias]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   diasNeg=+b.dataset.dias; pintarNegadas();
-});
-$$("[data-vista]").forEach(b=>b.onclick=()=>{
-  $$("[data-vista]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
-  VISTA_CLIENTE = b.dataset.vista==="cliente";
-  document.body.classList.toggle("modo-cliente",VISTA_CLIENTE);
-  pintarBuscar();
 });
 $$("[data-ord]").forEach(b=>b.onclick=()=>{
   $$("[data-ord]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
@@ -1320,9 +1306,7 @@ function ficha(i){
     <div class="cuerpo">
     <div class="ficha-top">
       <span class="clave interno">${esc(i.clave)}</span>
-      <span class="exist ${cero?'cero':''}">${VISTA_CLIENTE
-        ? (disp>0?"Disponible":"Sin existencia")
-        : `<b>${disp}</b> pz${res?` <em>de ${i.exist}</em>`:""}`}</span>
+      <span class="exist ${cero?'cero':''}"><b>${disp}</b> pz${res?` <em>de ${i.exist}</em>`:""}</span>
     </div>
     <div class="desc">${esc(i.desc||"—")}</div>
     <div class="renglon-precio">
@@ -1435,7 +1419,12 @@ function observarThumbs(){
     es.forEach(async e=>{
       if(!e.isIntersecting) return;
       const el=e.target; observador.unobserve(el);
-      const img=await thumbDe(el.dataset.thumb);
+      const clave=el.dataset.thumb;
+      let img=await thumbDe(clave);
+      if(!img){                       // foto tomada antes de que hubiera miniaturas
+        const full=await fotoDe(clave);
+        if(full) img=await reducir(full,260,.6);
+      }
       if(img) el.innerHTML=`<img src="${img}" alt="" loading="lazy">`;
       else el.classList.add("vacia");
     });
@@ -1599,7 +1588,8 @@ async function editar(clave){
   abrirModal(`
     <h2>${esc(i.clave)}</h2>
     <p class="sub-t">${esc(i.desc||"")}</p>
-    <div class="precios-int">
+    <button class="btn sec" id="ver-listas" style="margin:12px 0 0">Ver precios de lista</button>
+    <div class="precios-int oculto" id="precios-int">
       <div><span>Mostrador</span><b>${precioDe(i).hay?pesos(precioDe(i).final):"—"}</b><small>${
         precioDe(i).hay?(descuentoDe(i)?`lista ${pesos(precioDe(i).lista)} · −${descuentoDe(i)}%`:pesos(i.p1)+" + IVA"):"sin precio"}</small></div>
       <div><span>Lista 2</span><b>${i.p2>0?pesos(conIva(i.p2)):"—"}</b><small>${i.p2>0?pesos(i.p2)+" + IVA":""}</small></div>
@@ -1628,6 +1618,8 @@ async function editar(clave){
       <button class="btn sec" data-cerrar>Cancelar</button>
       <button class="btn" id="guardar">Guardar</button>
     </div>`);
+  $("#ver-listas").onclick = ()=>{ $("#precios-int").classList.toggle("oculto");
+    $("#ver-listas").textContent = $("#precios-int").classList.contains("oculto")?"Ver precios de lista":"Ocultar precios de lista"; };
   $("#scan-cb").onclick = ()=> escanear(txt=>{ $("#ecb").value = txt; });
   $("#guardar").onclick = async ()=>{
     const b=$("#guardar"); b.disabled=true; b.textContent="Guardando…";
