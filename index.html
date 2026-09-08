@@ -281,6 +281,15 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .abono:last-child{border-bottom:0}
 .abono .f{margin-left:auto;font-size:11px;color:var(--tinta-2)}
 .abono b{font-family:'JetBrains Mono';font-size:13px;min-width:72px;text-align:right}
+.en-caja{font-style:normal;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+  background:var(--verde);color:#fff;border-radius:3px;padding:1px 5px;margin-left:5px}
+.liq{margin:14px 0 4px}
+.liq>div{display:flex;align-items:baseline;gap:10px;padding:11px 13px;border:1px solid var(--linea);
+  border-radius:4px;margin-bottom:6px;background:var(--superficie);font-size:13px}
+.liq b{margin-left:auto;font-family:Oswald;font-size:19px}
+.liq .ant{background:var(--ambar-claro);border-color:var(--ambar)}
+.liq .cob{background:var(--azul-claro);border-color:var(--azul)}
+.liq .cob b{color:var(--azul);font-size:23px}
 @media(prefers-reduced-motion:reduce){.toast{transition:none}}
 .cargando{text-align:center;padding:60px 20px;color:var(--tinta-2);font-family:Oswald;letter-spacing:.08em;text-transform:uppercase}
 .filtros{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;scrollbar-width:none}
@@ -409,6 +418,13 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <div id="prev-import"></div>
     <div style="height:12px"></div>
     <button class="btn" id="btn-import" disabled>Procesar archivo</button>
+  </div>
+  <div class="tarjeta">
+    <h3>Miniaturas</h3>
+    <p>Genera las miniaturas de las fotos tomadas antes de esta función. Hazlo desde una computadora: procesa de 20 en 20 para no saturar el equipo.</p>
+    <div id="prog-thumbs"></div>
+    <div style="height:10px"></div>
+    <button class="btn sec" id="btn-thumbs">Generar 20 miniaturas</button>
   </div>
   <div class="tarjeta">
     <h3>Estado de los datos</h3>
@@ -571,6 +587,7 @@ let filasImport=null;
 const $  = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const idDoc = clave => encodeURIComponent(String(clave).trim()).replace(/\./g,"%2E");
+const TOPE_LISTA = (window.innerWidth<600 || navigator.deviceMemory<=4) ? 60 : 250;
 const esc = s => String(s??"").replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 function estado(txt, clase){ $("#txt-estado").textContent=txt; $("#punto").className="punto "+(clase||""); }
@@ -886,6 +903,10 @@ function nuevoFolio(tipo){
 }
 const abonado = a => (a.abonos||[]).reduce((s,x)=>s+(x.monto||0), 0);
 const saldoDe = a => Math.max(0,(a.total||0)-abonado(a));
+/* Un abono sin tipo es de los viejos: eran todos anticipos fuera de caja.  */
+const esCaja = x => x.tipo==="caja";
+const anticipado = a => (a.abonos||[]).filter(x=>!esCaja(x)).reduce((s,x)=>s+(x.monto||0),0);
+const cobradoCaja = a => (a.abonos||[]).filter(esCaja).reduce((s,x)=>s+(x.monto||0),0);
 const masDias = n => new Date(Date.now()+n*864e5).toISOString();
 const diasPara = f => Math.ceil((new Date(f)-Date.now())/864e5);
 
@@ -1027,7 +1048,7 @@ function verApartado(id){
 
     <label class="lbl">Abonos</label>
     ${(a.abonos||[]).length? `<div class="abonos">${a.abonos.map((x,k)=>`
-        <div class="abono"><span>${k===0?"Anticipo":"Abono "+(k+1)}</span>
+        <div class="abono"><span>${esCaja(x)?"Liquidación":(k===0?"Anticipo":"Abono "+(k+1))}${esCaja(x)?' <em class="en-caja">en caja SAIT</em>':""}</span>
           <span class="f">${esc(fechaCorta(x.fecha))}${x.quien?" · "+esc(x.quien):""}</span>
           <b>${pesos(x.monto)}</b></div>`).join("")}</div>`
       : `<div class="mini-dato">Sin abonos registrados.</div>`}
@@ -1053,7 +1074,7 @@ function verApartado(id){
       <div class="acciones">
         ${a.tipo==="pedido"&&!a.clave&&!a.llego?`<button class="btn sec" id="ap-llego">Ya llegó</button>`:""}
         <button class="btn sec" id="ap-canc" style="color:var(--rojo);border-color:var(--rojo)">Cancelar</button>
-        <button class="btn" id="ap-ent">Entregar</button>
+        <button class="btn" id="ap-liq">${saldo>0?"Liquidar y entregar":"Entregar"}</button>
       </div>`:`<div class="aviso">Este registro está ${esc(a.estado)}.</div>`}
     <div class="acciones"><button class="btn sec" data-cerrar>Cerrar</button></div>`);
 
@@ -1064,7 +1085,7 @@ function verApartado(id){
     try{ await setDoc(doc(db,COL_APARTADOS,a.id),{llego:true},{merge:true});
       a.llego=true; verApartado(id); aviso("Marcado como llegado. Avísale al cliente.","bien");
     }catch(e){ aviso("No se pudo actualizar."); } };
-  if($("#ap-ent")) $("#ap-ent").onclick=()=>{ cerrarModal(); cerrarApartado(a.id,"entregado"); };
+  if($("#ap-liq")) $("#ap-liq").onclick=()=>liquidar(a);
   if($("#ap-canc")) $("#ap-canc").onclick=()=>{ cerrarModal(); cerrarApartado(a.id,"cancelado"); };
 }
 
@@ -1122,6 +1143,40 @@ function imprimirNota(a){
   w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
 }
 
+async function liquidar(a){
+  const saldo=saldoDe(a), ant=anticipado(a);
+  abrirModal(`
+    <div class="folio">${esc(a.folio||"")}</div>
+    <h2>Liquidar y entregar</h2>
+    <p class="sub-t">${a.cant} pz · ${esc(a.desc||"")}</p>
+    <div class="liq">
+      <div><span>Registrar en SAIT como venta</span><b>${pesos(a.total)}</b></div>
+      <div class="ant"><span>Ya tenía anticipado (fuera de caja)</span><b>${pesos(ant)}</b></div>
+      <div class="cob"><span>Cobrar ahora al cliente</span><b>${pesos(saldo)}</b></div>
+    </div>
+    <p class="nota-precio">La venta se captura completa en SAIT por ${pesos(a.total)}. Del cliente solo recibes ${pesos(saldo)}; los ${pesos(ant)} restantes ya los tenías.</p>
+    <label class="lbl">Monto recibido ahora</label>
+    <input type="number" id="liq-monto" value="${saldo.toFixed(2)}" step="0.01" inputmode="decimal">
+    <div class="acciones">
+      <button class="btn sec" data-cerrar>Cancelar</button>
+      <button class="btn" id="liq-ok">Liquidar y entregar</button>
+    </div>`);
+  $("#liq-ok").onclick=async ()=>{
+    const monto=+$("#liq-monto").value||0;
+    if(monto>saldo+0.01){ aviso(`El saldo es ${pesos(saldo)}. No puede recibir de más.`); return; }
+    const b=$("#liq-ok"); b.disabled=true; b.textContent="Guardando…";
+    const abonos=[...(a.abonos||[])];
+    if(monto>0) abonos.push({fecha:hoyISO(),monto,quien:ultimoQuien,tipo:"caja"});
+    try{
+      await setDoc(doc(db,COL_APARTADOS,a.id),
+        {abonos, estado:"entregado", fechaCierre:hoyISO(), enCaja:true},{merge:true});
+      Object.assign(a,{abonos,estado:"entregado",fechaCierre:hoyISO(),enCaja:true});
+      cerrarModal(); pintar();
+      aviso(`Entregado. Captura la venta en SAIT por ${pesos(a.total)}.`,"bien");
+    }catch(e){ b.disabled=false; b.textContent="Liquidar y entregar"; aviso("No se pudo guardar."); }
+  };
+}
+
 async function cerrarApartado(id,estado){
   const a=(APARTADOS||[]).find(x=>x.id===id); if(!a) return;
   try{
@@ -1158,9 +1213,9 @@ async function pintarApartados(){
   const pedLlegaron=act.filter(a=>a.tipo==="pedido" && (porClave.get(a.clave)?.exist||0)>0);
   const resto=act.filter(a=>!vencidos.includes(a)&&!porVencer.includes(a)&&!pedLlegaron.includes(a));
   $("#exp-apartados").classList.remove("oculto");
-  const dinero=act.reduce((s,a)=>s+abonado(a),0);
+  const dinero=act.reduce((s,a)=>s+anticipado(a),0);   // fuera de SAIT
   const saldos=act.reduce((s,a)=>s+saldoDe(a),0);
-  $("#resumen-a").innerHTML=`<span>${act.length} activos · ${pesos(dinero)} en anticipos · ${pesos(saldos)} por cobrar</span>`;
+  $("#resumen-a").innerHTML=`<span>${act.length} activos · ${pesos(dinero)} en anticipos fuera de caja · ${pesos(saldos)} por cobrar al liquidar</span>`;
 
   const fila=a=>{
     const d=a.vence?diasPara(a.vence):null;
@@ -1186,7 +1241,7 @@ async function pintarApartados(){
       <div class="tags" style="margin-top:9px">
         <button class="btn-mini destacado" data-ver="${esc(a.id)}">Abrir nota</button>
         ${a.tel?`<button class="btn-mini ${llego||d<0?'negada':''}" data-wa="${esc(a.id)}">WhatsApp</button>`:""}
-        <button class="btn-mini" data-entregar="${esc(a.id)}">Entregar</button>
+        <button class="btn-mini" data-entregar="${esc(a.id)}">${saldo>0?"Liquidar":"Entregar"}</button>
       </div>
     </div>`;
   };
@@ -1198,7 +1253,7 @@ async function pintarApartados(){
     bloque("Activos",resto);
   $$("[data-ver]").forEach(b=>b.onclick=()=>verApartado(b.dataset.ver));
   $$("[data-wa]").forEach(b=>b.onclick=()=>avisarApartado(act.find(x=>x.id===b.dataset.wa)));
-  $$("[data-entregar]").forEach(b=>b.onclick=()=>cerrarApartado(b.dataset.entregar,"entregado"));
+  $$("[data-entregar]").forEach(b=>b.onclick=()=>liquidar(act.find(x=>x.id===b.dataset.entregar)));
   $$("[data-cancelar]").forEach(b=>b.onclick=()=>cerrarApartado(b.dataset.cancelar,"cancelado"));
 }
 
@@ -1308,9 +1363,9 @@ function pintarBuscar(){
     r.sort((a,b)=>disponible(b)-disponible(a) || a.clave.localeCompare(b.clave));
     $$(".chip.tipo,.chip.moto").forEach(x=>x.classList.remove("on"));
     $("#resumen-b").innerHTML=`<span>${r.length} artículos en oferta</span>`;
-    $("#res").innerHTML = r.length? r.slice(0,250).map(ficha).join("")
+    $("#res").innerHTML = r.length? r.slice(0,TOPE_LISTA).map(ficha).join("")
       : `<div class="vacio-msg"><div class="grande">Sin ofertas vigentes</div>Sube el archivo de promociones en Sincronizar.</div>`;
-    if(r.length>250) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando 250 de ${r.length}.</div>`);
+    if(r.length>TOPE_LISTA) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando ${TOPE_LISTA} de ${r.length}.</div>`);
     enlazarBotones();
     return;
   }
@@ -1319,8 +1374,8 @@ function pintarBuscar(){
     $$(".chip.tipo").forEach(x=>x.classList.toggle("on", x.dataset.tipo===catSel));
     $$(".chip.moto").forEach(x=>x.classList.remove("on"));
     $("#resumen-b").innerHTML=`<span>${r.length} en ${esc(catSel==="__SIN__"?"sin categoría":catSel)}</span>`;
-    $("#res").innerHTML = r.slice(0,250).map(ficha).join("");
-    if(r.length>250) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando 250 de ${r.length}.</div>`);
+    $("#res").innerHTML = r.slice(0,TOPE_LISTA).map(ficha).join("");
+    if(r.length>TOPE_LISTA) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando ${TOPE_LISTA} de ${r.length}.</div>`);
     enlazarBotones(); observarThumbs();
     return;
   }
@@ -1338,7 +1393,7 @@ function pintarBuscar(){
   $$(".chip.moto").forEach(x=>x.classList.toggle("on", normTexto(x.dataset.moto)===q));
   $("#resumen-b").innerHTML = `<span>${r.length} resultado${r.length===1?"":"s"}</span>`+
     (terminos.length?`<button class="btn-mini negada" id="neg-libre2">No es lo que pedía</button>`:"");
-  $("#res").innerHTML = r.length ? r.slice(0,250).map(ficha).join("")
+  $("#res").innerHTML = r.length ? r.slice(0,TOPE_LISTA).map(ficha).join("")
     : (()=>{ const prev=negadasQueCoinciden(terminos);
         return `<div class="vacio-msg"><div class="grande">No está en catálogo</div>
           Prueba con menos palabras, o registra el pedido para saber qué conviene traer.
@@ -1351,7 +1406,7 @@ function pintarBuscar(){
             <div class="desc">${esc(o.desc)}</div>
             <div class="mini-dato">última: ${esc(fechaCorta(o.ultima))} ${esc(horaCorta(o.ultima))}</div></div>`).join("")}</div>`:"");
       })();
-  if(r.length>250) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando 250 de ${r.length}. Afina la búsqueda.</div>`);
+  if(r.length>TOPE_LISTA) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando ${TOPE_LISTA} de ${r.length}. Afina la búsqueda.</div>`);
   enlazarBotones(); observarThumbs();
   const bLibre = $("#neg-libre") || $("#neg-libre2");
   if(bLibre) bLibre.onclick=()=>registrarNegada({texto:$("#q").value.trim()});
@@ -1488,13 +1543,22 @@ function enlazarBotones(){
    Se guardan dos tamaños. La grande (900px) para la pantalla del cliente, y
    una miniatura (260px, ~10 KB) en colección aparte para los resultados de
    búsqueda: así la lista muestra fotos sin arrastrar megas por consulta.   */
+/* Los dataURL pesan mucho: una foto grande son ~100 KB de texto en memoria.
+   Sin tope, recorrer la lista acumulaba decenas de megas y el navegador del
+   celular mataba la pestaña. Estos caches descartan lo más viejo.          */
 const cacheFotos = new Map(), cacheThumbs = new Map();
+const TOPE_FOTOS = 3, TOPE_THUMBS = 60;
+function guardaCache(mapa, clave, valor, tope){
+  if(mapa.has(clave)) mapa.delete(clave);
+  mapa.set(clave, valor);
+  while(mapa.size > tope){ mapa.delete(mapa.keys().next().value); }
+}
 async function fotoDe(clave){
   if(cacheFotos.has(clave)) return cacheFotos.get(clave);
   try{
     const s = await getDoc(doc(db,COL_FOTOS,idDoc(clave)));
     const img = s.exists()? s.data().img : null;
-    cacheFotos.set(clave,img);
+    guardaCache(cacheFotos,clave,img,TOPE_FOTOS);
     if(img && !cacheThumbs.get(clave)) migrarThumb(clave,img);   // fotos viejas
     return img;
   }catch(e){ return null; }
@@ -1504,15 +1568,15 @@ async function thumbDe(clave){
   try{
     const s = await getDoc(doc(db,COL_THUMBS,idDoc(clave)));
     const img = s.exists()? s.data().img : null;
-    cacheThumbs.set(clave,img); return img;
-  }catch(e){ cacheThumbs.set(clave,null); return null; }
+    guardaCache(cacheThumbs,clave,img,TOPE_THUMBS); return img;
+  }catch(e){ guardaCache(cacheThumbs,clave,null,TOPE_THUMBS); return null; }
 }
 /* Fotos guardadas antes de que existieran las miniaturas: se genera al vuelo */
 async function migrarThumb(clave,dataUrl){
   try{
     const t=await reducir(dataUrl,260,.6);
     await setDoc(doc(db,COL_THUMBS,idDoc(clave)),{img:t,act:hoyISO()});
-    cacheThumbs.set(clave,t);
+    guardaCache(cacheThumbs,clave,t,TOPE_THUMBS);
   }catch(e){}
 }
 
@@ -1524,12 +1588,9 @@ function observarThumbs(){
     es.forEach(async e=>{
       if(!e.isIntersecting) return;
       const el=e.target; observador.unobserve(el);
-      const clave=el.dataset.thumb;
-      let img=await thumbDe(clave);
-      if(!img){                       // foto tomada antes de que hubiera miniaturas
-        const full=await fotoDe(clave);
-        if(full) img=await reducir(full,260,.6);
-      }
+      // Solo miniaturas (~10 KB). Bajar la foto grande aquí reventaba la
+      // memoria del celular; las que falten se generan desde Sincronizar.
+      const img=await thumbDe(el.dataset.thumb);
       if(img) el.innerHTML=`<img src="${img}" alt="" loading="lazy">`;
       else el.classList.add("vacia");
     });
@@ -1543,12 +1604,31 @@ function reducir(dataUrl, max=900, calidad=.72){
       let {width:w,height:h}=im;
       if(w>max||h>max){ const k=max/Math.max(w,h); w=Math.round(w*k); h=Math.round(h*k); }
       const c=document.createElement("canvas"); c.width=w; c.height=h;
-      c.getContext("2d").drawImage(im,0,0,w,h);
-      res(c.toDataURL("image/jpeg",calidad));
+      const cx=c.getContext("2d"); cx.drawImage(im,0,0,w,h);
+      const out=c.toDataURL("image/jpeg",calidad);
+      c.width=c.height=0; im.src="";      // libera el lienzo y la imagen
+      res(out);
     };
     im.onerror=()=>rej(new Error("No se pudo leer la imagen"));
     im.src=dataUrl;
   });
+}
+/* La cámara entrega ~12 MP. Leer eso como dataURL y dibujarlo completo es
+   lo que tumbaba el navegador. Con createImageBitmap el decodificado va
+   fuera del hilo principal y nunca existe la copia gigante en texto.      */
+async function comprimirArchivo(file, max=900, calidad=.72){
+  if(!("createImageBitmap" in window)) return comprimir(file,max,calidad);
+  let bmp;
+  try{ bmp = await createImageBitmap(file); }
+  catch(e){ return comprimir(file,max,calidad); }
+  let {width:w,height:h}=bmp;
+  if(w>max||h>max){ const k=max/Math.max(w,h); w=Math.round(w*k); h=Math.round(h*k); }
+  const c=document.createElement("canvas"); c.width=w; c.height=h;
+  c.getContext("2d").drawImage(bmp,0,0,w,h);
+  bmp.close();
+  const out=c.toDataURL("image/jpeg",calidad);
+  c.width=c.height=0;
+  return out;
 }
 function comprimir(file, max=900, calidad=.72){
   return new Promise((res,rej)=>{
@@ -1569,10 +1649,10 @@ function comprimir(file, max=900, calidad=.72){
 }
 async function guardarFoto(clave,dataUrl){
   await setDoc(doc(db,COL_FOTOS,idDoc(clave)),{img:dataUrl,act:hoyISO()});
-  cacheFotos.set(clave,dataUrl);
   const thumb=await reducir(dataUrl,260,.6);
   await setDoc(doc(db,COL_THUMBS,idDoc(clave)),{img:thumb,act:hoyISO()});
-  cacheThumbs.set(clave,thumb);
+  guardaCache(cacheThumbs,clave,thumb,TOPE_THUMBS);
+  cacheFotos.delete(clave);           // la grande se relee si hace falta
   const it=porClave.get(clave); if(it) it.foto=true;
 }
 
@@ -1610,7 +1690,7 @@ async function mostrador(clave){
       if(!inp.files[0]) return;
       cont.innerHTML=`<div class="m-cargando">Guardando…</div>`;
       try{
-        const d=await comprimir(inp.files[0]);
+        const d=await comprimirArchivo(inp.files[0]);
         await guardarFoto(clave,d);
         cont.innerHTML=`<img src="${d}" alt="">`;
         $("#wa").textContent="Enviar con foto";
@@ -1982,6 +2062,28 @@ $("#btn-import").onclick = async ()=>{
 $("#nuevo-apa").onclick = elegirPieza;
 
 /* Diagnóstico: dice exactamente qué archivo faltó, en vez de dejarte adivinar */
+$("#btn-thumbs").onclick = async ()=>{
+  const b=$("#btn-thumbs"); b.disabled=true;
+  let hechas=0, revisadas=0;
+  try{
+    for(const i of ITEMS){
+      if(hechas>=20) break;
+      revisadas++;
+      b.textContent=`Revisando ${revisadas}…`;
+      if(await thumbDe(i.clave)) continue;         // ya tiene
+      const full=await fotoDe(i.clave);
+      if(!full) continue;                          // no tiene foto
+      const t=await reducir(full,260,.6);
+      await setDoc(doc(db,COL_THUMBS,idDoc(i.clave)),{img:t,act:hoyISO()});
+      guardaCache(cacheThumbs,i.clave,t,TOPE_THUMBS);
+      cacheFotos.delete(i.clave);
+      hechas++;
+    }
+    $("#prog-thumbs").innerHTML=`<div class="aviso bien">${hechas} miniatura(s) generada(s) de ${revisadas} artículos revisados.${hechas>=20?" Vuelve a pulsar para seguir.":" Ya no quedan pendientes."}</div>`;
+  }catch(e){ $("#prog-thumbs").innerHTML=`<div class="aviso malo">${esc(e.message)}</div>`; }
+  b.disabled=false; b.textContent="Generar 20 miniaturas";
+};
+
 $("#btn-diag").onclick = async ()=>{
   await cargarOfertas();
   const hoy=fechaISO(hoyISO());
@@ -2007,7 +2109,8 @@ $("#exp-apartados").onclick = async ()=>{
   if(!a.length){ aviso("Todavía no hay apartados ni pedidos registrados."); return; }
   const filas=a.map(x=>({ Fecha:fechaISO(x.fecha), Tipo:x.tipo, Estado:x.estado,
     Clave:x.clave||"", Descripcion:x.desc||"", Piezas:x.cant||1,
-    Folio:x.folio||"", Total:x.total||0, Abonado:abonado(x), Saldo:saldoDe(x), Abonos:(x.abonos||[]).length,
+    Folio:x.folio||"", Total:x.total||0, "Anticipos fuera de caja":anticipado(x), "Cobrado en caja":cobradoCaja(x),
+    Saldo:saldoDe(x), Abonos:(x.abonos||[]).length,
     Cliente:x.cliente||"", WhatsApp:x.tel||"", Tomo:x.quien||"", Notas:x.notas||"",
     Vence:fechaISO(x.vence), Cierre:fechaISO(x.fechaCierre) }));
   const wb=XLSX.utils.book_new();
