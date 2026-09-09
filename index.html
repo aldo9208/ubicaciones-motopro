@@ -354,6 +354,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <button class="chip" data-f="conex">Con existencia</button>
     <button class="chip" data-f="sinub">Sin ubicar</button>
     <button class="chip oferta-chip" data-f="oferta">En oferta <b id="n-of"></b></button>
+    <button class="chip aviso-chip" data-f="sinfoto">Sin foto <b id="n-foto"></b></button>
   </div>
   <div class="filtros" id="tipos"></div>
   <div class="filtros" id="motos"></div>
@@ -418,6 +419,13 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <div id="prev-import"></div>
     <div style="height:12px"></div>
     <button class="btn" id="btn-import" disabled>Procesar archivo</button>
+  </div>
+  <div class="tarjeta">
+    <h3>Índice de fotos</h3>
+    <p>Recorre las fotos guardadas y marca qué artículos ya tienen. Córrelo una vez desde la computadora; después se mantiene solo.</p>
+    <div id="prog-indice"></div>
+    <div style="height:10px"></div>
+    <button class="btn sec" id="btn-indice">Revisar fotos existentes</button>
   </div>
   <div class="tarjeta">
     <h3>Miniaturas</h3>
@@ -612,6 +620,7 @@ async function recargar(){
     ITEMS.forEach(construirIndice);
     pintarTipos(); pintarMotos();
     $("#n-of").textContent = ITEMS.filter(i=>descuentoDe(i)>0).length;
+    $("#n-foto").textContent = ITEMS.filter(i=>(i.exist||0)>0 && !i.foto).length;
     await cargarOfertas();
     await cargarApartados();
     $("#n-apa").textContent = activos().length;
@@ -905,8 +914,15 @@ const abonado = a => (a.abonos||[]).reduce((s,x)=>s+(x.monto||0), 0);
 const saldoDe = a => Math.max(0,(a.total||0)-abonado(a));
 /* Un abono sin tipo es de los viejos: eran todos anticipos fuera de caja.  */
 const esCaja = x => x.tipo==="caja";
-const anticipado = a => (a.abonos||[]).filter(x=>!esCaja(x)).reduce((s,x)=>s+(x.monto||0),0);
 const cobradoCaja = a => (a.abonos||[]).filter(esCaja).reduce((s,x)=>s+(x.monto||0),0);
+const faltaTotal = a => !(a.total>0);
+/* Dinero que Aldo trae en mano: solo mientras el apartado NO esté pagado.
+   Al quedar liquidado se captura completo en SAIT y sale de este conteo.   */
+function fueraDeCaja(a){
+  if(faltaTotal(a)) return abonado(a);        // total sin capturar: sigue afuera
+  return saldoDe(a)>0 ? abonado(a) : 0;
+}
+const estaPagado = a => !faltaTotal(a) && saldoDe(a)<=0;
 const masDias = n => new Date(Date.now()+n*864e5).toISOString();
 const diasPara = f => Math.ceil((new Date(f)-Date.now())/864e5);
 
@@ -1046,6 +1062,12 @@ function verApartado(id){
       <div class="${saldo>0?'debe':'pagado'}"><span>Saldo</span><b>${pesos(saldo)}</b></div>
     </div>
 
+    ${faltaTotal(a)?`<div class="aviso malo">Este registro no tiene total capturado, así que no se puede calcular el saldo ni saber si ya está pagado.</div>`:""}
+    ${a.estado==="activo"?`
+      <div class="grid2" style="margin-top:10px">
+        <input type="number" id="ed-total" value="${a.total||""}" step="0.01" inputmode="decimal" placeholder="Total a pagar">
+        <button class="btn sec" id="ed-ok">Corregir total</button>
+      </div>`:""}
     <label class="lbl">Abonos</label>
     ${(a.abonos||[]).length? `<div class="abonos">${a.abonos.map((x,k)=>`
         <div class="abono"><span>${esCaja(x)?"Liquidación":(k===0?"Anticipo":"Abono "+(k+1))}${esCaja(x)?' <em class="en-caja">en caja SAIT</em>':""}</span>
@@ -1079,6 +1101,14 @@ function verApartado(id){
     <div class="acciones"><button class="btn sec" data-cerrar>Cerrar</button></div>`);
 
   if($("#ab-add")) $("#ab-add").onclick=()=>agregarAbono(a);
+  if($("#ed-ok")) $("#ed-ok").onclick=async ()=>{
+    const t=+$("#ed-total").value||0;
+    if(t<=0){ aviso("Escribe el total a pagar."); return; }
+    if(t<abonado(a)){ aviso(`Ya abonó ${pesos(abonado(a))}. El total no puede ser menor.`); return; }
+    try{ await setDoc(doc(db,COL_APARTADOS,a.id),{total:t},{merge:true});
+      a.total=t; verApartado(a.id); pintar();
+      aviso(estaPagado(a)?"Total corregido. Queda pagado, así que sale del dinero fuera de caja.":"Total corregido.","bien");
+    }catch(e){ aviso("No se pudo guardar."); } };
   if($("#ap-wa")) $("#ap-wa").onclick=()=>mandarNota(a);
   $("#ap-print").onclick=()=>imprimirNota(a);
   if($("#ap-llego")) $("#ap-llego").onclick=async ()=>{
@@ -1144,7 +1174,7 @@ function imprimirNota(a){
 }
 
 async function liquidar(a){
-  const saldo=saldoDe(a), ant=anticipado(a);
+  const saldo=saldoDe(a), ant=fueraDeCaja(a);
   abrirModal(`
     <div class="folio">${esc(a.folio||"")}</div>
     <h2>Liquidar y entregar</h2>
@@ -1211,11 +1241,14 @@ async function pintarApartados(){
   const vencidos=act.filter(a=>a.tipo==="apartado" && a.vence && diasPara(a.vence)<0);
   const porVencer=act.filter(a=>a.tipo==="apartado" && a.vence && diasPara(a.vence)>=0 && diasPara(a.vence)<=3);
   const pedLlegaron=act.filter(a=>a.tipo==="pedido" && (porClave.get(a.clave)?.exist||0)>0);
-  const resto=act.filter(a=>!vencidos.includes(a)&&!porVencer.includes(a)&&!pedLlegaron.includes(a));
+  const sinTotal=act.filter(faltaTotal);
+  const resto=act.filter(a=>!vencidos.includes(a)&&!porVencer.includes(a)&&!pedLlegaron.includes(a)&&!sinTotal.includes(a)&&!pagados.includes(a));
   $("#exp-apartados").classList.remove("oculto");
-  const dinero=act.reduce((s,a)=>s+anticipado(a),0);   // fuera de SAIT
+  const dinero=act.reduce((s,a)=>s+fueraDeCaja(a),0);   // lo que traes en mano
   const saldos=act.reduce((s,a)=>s+saldoDe(a),0);
-  $("#resumen-a").innerHTML=`<span>${act.length} activos · ${pesos(dinero)} en anticipos fuera de caja · ${pesos(saldos)} por cobrar al liquidar</span>`;
+  const pagados=act.filter(estaPagado);
+  $("#resumen-a").innerHTML=`<span>${act.length} activos · ${pesos(dinero)} en anticipos fuera de caja · ${pesos(saldos)} por cobrar${
+  pagados.length?` · ${pagados.length} ya pagado(s) en SAIT`:""}</span>`;
 
   const fila=a=>{
     const d=a.vence?diasPara(a.vence):null;
@@ -1228,8 +1261,9 @@ async function pintarApartados(){
       </div>
       <div class="desc"><b>${a.cant} pz</b> · ${esc(a.desc||"")}</div>
       <div class="dinero">
-        <span>Total ${pesos(a.total)}</span><span>Abonó ${pesos(abonado(a))}</span>
-        <span class="${saldo>0?'debe':'pagado'}">${saldo>0?"Debe "+pesos(saldo):"Pagado"}</span>
+        <span>Total ${faltaTotal(a)?"—":pesos(a.total)}</span><span>Abonó ${pesos(abonado(a))}</span>
+        <span class="${faltaTotal(a)?'debe':saldo>0?'debe':'pagado'}">${
+          faltaTotal(a)?"Falta capturar el total":saldo>0?"Debe "+pesos(saldo):"Pagado · en caja SAIT"}</span>
       </div>
       <div class="mini-dato">
         ${a.tipo==="apartado"
@@ -1247,7 +1281,9 @@ async function pintarApartados(){
   };
   const bloque=(t,l,c)=>l.length?`<h3 class="sec-tit ${c||""}">${t} (${l.length})</h3><div class="lista">${l.map(fila).join("")}</div>`:"";
   $("#lista-apartados").innerHTML =
+    bloque("Falta capturar el total — el saldo no se puede calcular",sinTotal,"rojo")+
     bloque("Vencidos — la pieza sigue ocupada",vencidos,"rojo")+
+    bloque("Pagados en SAIT — solo falta que pasen por la pieza",pagados.filter(a=>!vencidos.includes(a)&&!pedLlegaron.includes(a)),"verde")+
     bloque("Ya llegaron — avisa al cliente",pedLlegaron,"verde")+
     bloque("Por vencer esta semana",porVencer)+
     bloque("Activos",resto);
@@ -1357,8 +1393,19 @@ function pintarBuscar(){
   if(filtro==="conex") r = r.filter(i=>(i.exist||0)>0);
   if(filtro==="sinub") r = r.filter(i=>!tieneUbic(i));
   if(filtro==="oferta") r = r.filter(i=>descuentoDe(i)>0);
+  if(filtro==="sinfoto") r = r.filter(i=>(i.exist||0)>0 && !i.foto);
   if(catSel) r = (catSel==="__SIN__") ? r.filter(i=>!i.cat) : r.filter(i=>i.cat===catSel);
   if(terminos.length) r = r.filter(i=>terminos.every(t=>coincide(i,t)));
+  else if(filtro==="sinfoto"){
+    r.sort((a,b)=>(b.exist||0)*(b.p1||0)-(a.exist||0)*(a.p1||0));
+    $$(".chip.tipo,.chip.moto").forEach(x=>x.classList.remove("on"));
+    $("#resumen-b").innerHTML=`<span>${r.length} con existencia y sin foto — ordenados por valor</span>`;
+    $("#res").innerHTML = r.length? r.slice(0,TOPE_LISTA).map(ficha).join("")
+      : `<div class="vacio-msg"><div class="grande">Todo fotografiado</div>No hay artículos con existencia sin foto.</div>`;
+    if(r.length>TOPE_LISTA) $("#res").insertAdjacentHTML("beforeend",`<div class="resumen" style="text-align:center;padding:10px">Mostrando ${TOPE_LISTA} de ${r.length}.</div>`);
+    enlazarBotones(); observarThumbs();
+    return;
+  }
   else if(filtro==="oferta"){
     r.sort((a,b)=>disponible(b)-disponible(a) || a.clave.localeCompare(b.clave));
     $$(".chip.tipo,.chip.moto").forEach(x=>x.classList.remove("on"));
@@ -1653,6 +1700,9 @@ async function guardarFoto(clave,dataUrl){
   await setDoc(doc(db,COL_THUMBS,idDoc(clave)),{img:thumb,act:hoyISO()});
   guardaCache(cacheThumbs,clave,thumb,TOPE_THUMBS);
   cacheFotos.delete(clave);           // la grande se relee si hace falta
+  /* Marca en el propio artículo que ya tiene foto. Así contar cuántas
+     faltan es instantáneo, sin recorrer la colección de imágenes.        */
+  await setDoc(doc(db,COLECCION,idDoc(clave)),{foto:true},{merge:true});
   const it=porClave.get(clave); if(it) it.foto=true;
 }
 
@@ -2018,6 +2068,7 @@ $("#btn-import").onclick = async ()=>{
       await setDoc(doc(db,COL_CONFIG,"ofertas"),{lista:filasImport.ofertas,act:hoyISO()});
       await cargarOfertas();
       $("#n-of").textContent = ITEMS.filter(i=>descuentoDe(i)>0).length;
+    $("#n-foto").textContent = ITEMS.filter(i=>(i.exist||0)>0 && !i.foto).length;
       pintar();
       $("#prev-import").innerHTML=`<div class="aviso bien"><b>Ofertas guardadas.</b> Ya se aplican en los precios.</div>`;
     }catch(e){ $("#prev-import").innerHTML=`<div class="aviso malo">${esc(e.message)}</div>`; }
@@ -2062,6 +2113,33 @@ $("#btn-import").onclick = async ()=>{
 $("#nuevo-apa").onclick = elegirPieza;
 
 /* Diagnóstico: dice exactamente qué archivo faltó, en vez de dejarte adivinar */
+/* Una sola pasada por la colección de fotos para marcar cuáles ya existen.
+   Descarga las imágenes, así que conviene hacerlo desde una computadora.  */
+$("#btn-indice").onclick = async ()=>{
+  const b=$("#btn-indice"); b.disabled=true; b.textContent="Revisando…";
+  try{
+    const con=new Set();
+    for(const col of [COL_THUMBS, COL_FOTOS]){
+      const s=await getDocs(collection(db,col));
+      s.docs.forEach(x=>con.add(decodeURIComponent(x.id)));
+      if(con.size) break;              // con las miniaturas basta
+    }
+    let n=0;
+    for(let i=0;i<ITEMS.length;i+=400){
+      const lote=writeBatch(db); let hay=false;
+      ITEMS.slice(i,i+400).forEach(it=>{
+        const tiene=con.has(it.clave);
+        if(tiene!==!!it.foto){ lote.set(doc(db,COLECCION,idDoc(it.clave)),{foto:tiene},{merge:true}); it.foto=tiene; hay=true; if(tiene)n++; }
+      });
+      if(hay) await lote.commit();
+    }
+    $("#n-foto").textContent = ITEMS.filter(i=>(i.exist||0)>0 && !i.foto).length;
+    pintar();
+    $("#prog-indice").innerHTML=`<div class="aviso bien">${con.size} foto(s) encontradas. ${n} artículo(s) marcados.</div>`;
+  }catch(e){ $("#prog-indice").innerHTML=`<div class="aviso malo">${esc(e.message)}</div>`; }
+  b.disabled=false; b.textContent="Revisar fotos existentes";
+};
+
 $("#btn-thumbs").onclick = async ()=>{
   const b=$("#btn-thumbs"); b.disabled=true;
   let hechas=0, revisadas=0;
@@ -2096,6 +2174,11 @@ $("#btn-diag").onclick = async ()=>{
     fila("Artículos en catálogo", ITEMS.length, ITEMS.length>0)+
     fila("Con precio", conPrecio, conPrecio>0)+
     fila("Con categoría", conCat, conCat>0)+
+    (()=>{ const cx=ITEMS.filter(i=>(i.exist||0)>0);
+      const cf=cx.filter(i=>i.foto).length;
+      return fila("Con existencia", cx.length, cx.length>0)+
+             fila("De esos, con foto", cf, cf>0)+
+             fila("De esos, SIN foto", cx.length-cf, cx.length-cf===0); })()+
     fila("Ofertas cargadas", OFERTAS.length, OFERTAS.length>0)+
     fila("Ofertas vigentes hoy", vig.length, vig.length>0)+
     fila("Artículos con descuento", conDesc, conDesc>0)+
@@ -2109,7 +2192,7 @@ $("#exp-apartados").onclick = async ()=>{
   if(!a.length){ aviso("Todavía no hay apartados ni pedidos registrados."); return; }
   const filas=a.map(x=>({ Fecha:fechaISO(x.fecha), Tipo:x.tipo, Estado:x.estado,
     Clave:x.clave||"", Descripcion:x.desc||"", Piezas:x.cant||1,
-    Folio:x.folio||"", Total:x.total||0, "Anticipos fuera de caja":anticipado(x), "Cobrado en caja":cobradoCaja(x),
+    Folio:x.folio||"", Total:x.total||0, "Fuera de caja":fueraDeCaja(x), "Cobrado en caja":cobradoCaja(x),
     Saldo:saldoDe(x), Abonos:(x.abonos||[]).length,
     Cliente:x.cliente||"", WhatsApp:x.tel||"", Tomo:x.quien||"", Notas:x.notas||"",
     Vence:fechaISO(x.vence), Cierre:fechaISO(x.fechaCierre) }));
