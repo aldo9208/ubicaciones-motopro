@@ -260,6 +260,16 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .dinero .debe{color:var(--rojo);font-weight:700}
 .dinero .pagado{color:var(--verde);font-weight:700}
 .notas{margin-top:6px;font-size:12.5px;font-style:italic;color:var(--tinta-2)}
+.zona{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--superficie);
+  border:1px solid var(--linea);border-left:4px solid var(--linea);border-radius:var(--r);
+  padding:13px;margin-bottom:7px}
+.zona .nom{font-family:Oswald;font-size:15px;letter-spacing:.05em;text-transform:uppercase}
+.zona .est{margin-left:auto;font-size:11.5px;color:var(--tinta-2);text-align:right}
+.zona.abierta{border-left-color:var(--ambar);background:var(--ambar-claro)}
+.zona.cerrada{border-left-color:var(--verde);background:#F2FAF6}
+.zona.cerrada .est{color:var(--verde);font-weight:600}
+.cbar{display:flex;align-items:center;gap:10px;padding-bottom:10px;border-bottom:1px solid var(--linea)}
+.cbar .btn-mini.destacado{margin-left:auto}
 .sec-tit.rojo{color:var(--rojo);border-bottom-color:var(--rojo)}
 .sec-tit.verde{color:var(--verde);border-bottom-color:var(--verde)}
 .sel-item{display:block;width:100%;text-align:left;background:var(--superficie);border:1px solid var(--linea);
@@ -332,6 +342,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
   <button class="tab on" data-t="buscar">Buscar</button>
   <button class="tab" data-t="mapa">Almacén</button>
   <button class="tab" data-t="pend">Sin ubicar<span class="num" id="n-pend">0</span></button>
+  <button class="tab" data-t="conteo">Conteo</button>
   <button class="tab" data-t="ventas">Ventas</button>
   <button class="tab" data-t="apartados">Apartados<span class="num" id="n-apa">0</span></button>
   <button class="tab" data-t="negadas">Negadas</button>
@@ -372,6 +383,12 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 <div class="panel oculto" id="p-pend">
   <div class="resumen" id="resumen-p"></div>
   <div class="lista" id="lista-pend"></div>
+</div>
+
+<!-- CONTEO -->
+<div class="panel oculto" id="p-conteo">
+  <div class="resumen" id="resumen-c"></div>
+  <div id="lista-conteo"><div class="cargando">Cargando…</div></div>
 </div>
 
 <!-- VENTAS -->
@@ -457,7 +474,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, getDocs, getDoc, doc, setDoc, writeBatch
+  collection, getDocs, getDoc, doc, setDoc, deleteDoc, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ============ CONFIGURACIÓN ============ */
@@ -474,6 +491,8 @@ const COL_NEGADAS = "motopro_negadas";
 const COL_APARTADOS = "motopro_apartados";
 const COL_CONFIG = "motopro_config";
 const COL_VENTAS = "motopro_ventas";
+const COL_CONTEOS = "motopro_conteos";
+const COL_LINEAS = "motopro_conteo_lineas";
 const CLAVE_ADMIN = "motopro2026";   // <-- cámbiala por la que quieras
 const IVA = 0.16;                     // Precio 1 viene sin IVA en SAIT
 
@@ -637,7 +656,7 @@ async function recargar(){
 $$(".tab").forEach(b=>b.onclick=()=>{
   $$(".tab").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   pestana=b.dataset.t;
-  ["buscar","mapa","pend","ventas","apartados","negadas","admin"].forEach(t=>$("#p-"+t).classList.toggle("oculto",t!==pestana));
+  ["buscar","mapa","pend","conteo","ventas","apartados","negadas","admin"].forEach(t=>$("#p-"+t).classList.toggle("oculto",t!==pestana));
   pintar();
 });
 $$("[data-f]").forEach(b=>b.onclick=()=>{
@@ -663,6 +682,266 @@ let tmr; $("#q").addEventListener("input",()=>{clearTimeout(tmr);catSel="";tmr=s
 const tieneUbic = i => !!(i.u1);
 const pendientes = () => ITEMS.filter(i=>!tieneUbic(i) && (i.exist||0)>0)
                              .sort((a,b)=>(b.exist||0)-(a.exist||0));
+
+
+/* ============ CONTEO FÍSICO ============
+   Conteo a ciegas por zonas, con varios contando al mismo tiempo.
+   A ciegas: durante el conteo NUNCA se muestra la existencia del sistema.
+   Ver el número esperado sesga a quien cuenta y el inventario deja de servir.
+   Cada zona se apropia por una persona para que dos no cuenten lo mismo.
+   Las líneas se guardan como documentos sueltos: así dos celulares que
+   escriben a la vez no se pisan.                                          */
+let CONTEOS=null, LINEAS=null, zonaActiva=null, quienCuenta="";
+
+const slugZona = z => normTexto(z).replace(/\s+/g,"-");
+const zonaDe = i => [i.u1,i.u2].filter(Boolean).join(" · ") || "SIN UBICAR";
+
+async function cargarConteo(){
+  if(CONTEOS && LINEAS) return;
+  try{
+    const [a,b]=await Promise.all([getDocs(collection(db,COL_CONTEOS)),getDocs(collection(db,COL_LINEAS))]);
+    CONTEOS=a.docs.map(d=>({id:d.id,...d.data()}));
+    LINEAS=b.docs.map(d=>({id:d.id,...d.data()}));
+  }catch(e){ CONTEOS=CONTEOS||[]; LINEAS=LINEAS||[]; }
+}
+const conteoDe = zid => (CONTEOS||[]).find(c=>c.id===zid);
+const lineasDe = zid => (LINEAS||[]).filter(l=>l.zonaId===zid);
+
+/* Zonas del almacén, con cuántas claves se esperan en cada una */
+function zonas(){
+  const m=new Map();
+  ITEMS.forEach(i=>{ if(!i.u1) return;
+    const z=zonaDe(i); if(!m.has(z)) m.set(z,{zona:z,esperadas:0});
+    m.get(z).esperadas++; });
+  return [...m.values()].sort((a,b)=>a.zona.localeCompare(b.zona,'es',{numeric:true}));
+}
+
+async function pintarConteo(){
+  await cargarConteo();
+  if(zonaActiva) return pintarZona();
+  const zs=zonas();
+  const hechas=zs.filter(z=>conteoDe(slugZona(z.zona))?.estado==="cerrada").length;
+  const curso=zs.filter(z=>conteoDe(slugZona(z.zona))?.estado==="abierta");
+  $("#resumen-c").innerHTML=`<span>${zs.length} zonas · ${hechas} contadas · ${curso.length} en proceso</span>`;
+  $("#lista-conteo").innerHTML = zs.map(z=>{
+    const zid=slugZona(z.zona), c=conteoDe(zid), l=lineasDe(zid).length;
+    const est=c?.estado;
+    return `<button class="zona ${est||''}" data-zona="${esc(z.zona)}">
+      <span class="nom">${esc(z.zona)}</span>
+      <span class="est">${est==="cerrada"?`Contada · ${l} claves`
+        : est==="abierta"?`Contando ${esc(c.quien||"")} · ${l}`
+        : `${z.esperadas} claves esperadas`}</span>
+    </button>`;
+  }).join("")+
+  `<div style="margin-top:14px"><button class="btn sec" id="c-difs">Ver diferencias</button></div>`;
+  $$("[data-zona]").forEach(b=>b.onclick=()=>abrirZona(b.dataset.zona));
+  $("#c-difs").onclick=verDiferencias;
+}
+
+async function abrirZona(zona){
+  const zid=slugZona(zona), c=conteoDe(zid);
+  if(c?.estado==="cerrada"){
+    if(!confirm(`${zona} ya se contó. ¿Volver a abrirla? Se conserva lo contado.`)) return;
+  }
+  if(!quienCuenta){
+    const n=prompt("¿Quién va a contar? (nombre o iniciales)");
+    if(!n) return; quienCuenta=n.trim();
+  }
+  if(c?.estado==="abierta" && c.quien && c.quien!==quienCuenta){
+    if(!confirm(`${c.quien} tiene abierta esta zona. ¿Continuar de todos modos?`)) return;
+  }
+  try{
+    await setDoc(doc(db,COL_CONTEOS,zid),{zona,estado:"abierta",quien:quienCuenta,inicio:hoyISO()},{merge:true});
+    const ya=conteoDe(zid);
+    if(ya) Object.assign(ya,{zona,estado:"abierta",quien:quienCuenta});
+    else CONTEOS.push({id:zid,zona,estado:"abierta",quien:quienCuenta,inicio:hoyISO()});
+  }catch(e){ aviso("No se pudo abrir la zona."); return; }
+  zonaActiva=zona; pintarZona();
+}
+
+function pintarZona(){
+  const zona=zonaActiva, zid=slugZona(zona);
+  const ls=lineasDe(zid).sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
+  const piezas=ls.reduce((s,l)=>s+(l.cant||0),0);
+  $("#resumen-c").innerHTML=`<span>Contando ${esc(zona)} · ${ls.length} claves · ${piezas} piezas</span>`;
+  $("#lista-conteo").innerHTML=`
+    <div class="cbar">
+      <button class="btn-mini" id="c-volver">← Zonas</button>
+      <span class="mini-dato">cuenta ${esc(quienCuenta)}</span>
+      <button class="btn-mini destacado" id="c-cerrar">Cerrar zona</button>
+    </div>
+    <div class="buscador" style="margin-top:12px">
+      <div class="campo-buscar"><input id="c-q" type="text" placeholder="Clave o descripción" autocomplete="off"></div>
+      <button class="btn-cam" id="c-scan" title="Escanear">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><path d="M6 12h12" stroke-width="2.4"/></svg>
+      </button>
+    </div>
+    <div id="c-res"></div>
+    <h3 class="sec-tit">Contado en esta zona (${ls.length})</h3>
+    <div class="lista">${ls.length? ls.map(l=>{
+      const i=porClave.get(l.clave);
+      const fuera=i && zonaDe(i)!==zona;
+      return `<div class="ficha ${fuera?'pend':''}">
+        <div class="ficha-top"><span class="clave">${esc(l.clave)}</span>
+          <span class="exist"><b>${l.cant}</b> pz</span></div>
+        <div class="desc">${esc(i?.desc||l.desc||"")}</div>
+        ${fuera?`<div class="reservado">Su lugar es ${esc(zonaDe(i))}</div>`:""}
+        <div class="tags"><button class="btn-mini" data-cedit="${esc(l.clave)}">Corregir</button>
+          <button class="btn-mini negada" data-cdel="${esc(l.clave)}">Quitar</button>
+          ${fuera?`<button class="btn-mini" data-cmover="${esc(l.clave)}">Mover aquí</button>`:""}</div>
+      </div>`;}).join("") : `<div class="mini-dato" style="padding:8px 2px">Nada contado todavía.</div>`}</div>`;
+  $("#c-volver").onclick=()=>{ zonaActiva=null; pintarConteo(); };
+  $("#c-cerrar").onclick=cerrarZona;
+  $("#c-scan").onclick=()=>escanear(t=>{ $("#c-q").value=t; buscarParaContar(); });
+  let t2; $("#c-q").addEventListener("input",()=>{clearTimeout(t2);t2=setTimeout(buscarParaContar,120)});
+  $$("[data-cedit]").forEach(b=>b.onclick=()=>capturar(b.dataset.cedit));
+  $$("[data-cdel]").forEach(b=>b.onclick=()=>borrarLinea(b.dataset.cdel));
+  $$("[data-cmover]").forEach(b=>b.onclick=()=>moverAqui(b.dataset.cmover));
+  $("#c-q").focus();
+}
+
+/* Buscador del conteo: no muestra existencias, solo identifica la pieza */
+function buscarParaContar(){
+  const ts=normTexto($("#c-q").value).split(" ").filter(Boolean);
+  if(!ts.length){ $("#c-res").innerHTML=""; return; }
+  const r=ITEMS.filter(i=>ts.every(t=>coincide(i,t))).slice(0,6);
+  $("#c-res").innerHTML = r.length? r.map(i=>`
+    <button class="sel-item" data-ccap="${esc(i.clave)}">
+      <span class="clave">${esc(i.clave)}</span>
+      <span class="desc">${esc(i.desc||"")}</span>
+      <span class="mini-dato">${esc(zonaDe(i))}</span>
+    </button>`).join("")
+    : `<div class="mini-dato" style="padding:8px 2px">Sin resultados.</div>`;
+  $$("[data-ccap]").forEach(b=>b.onclick=()=>capturar(b.dataset.ccap));
+}
+
+function capturar(clave){
+  const i=porClave.get(clave); if(!i) return;
+  const zid=slugZona(zonaActiva);
+  const prev=lineasDe(zid).find(l=>l.clave===clave);
+  abrirModal(`<h2>${esc(clave)}</h2>
+    <p class="sub-t">${esc(i.desc||"")}</p>
+    <p class="sub-t">${esc(zonaActiva)}</p>
+    <label class="lbl">¿Cuántas piezas hay?</label>
+    <input type="number" id="c-cant" value="${prev?prev.cant:""}" inputmode="numeric" step="1" min="0" placeholder="0" autofocus>
+    <div class="cants" style="margin-top:8px">${[1,2,3,4,5,6,10,12].map(n=>`<button class="cant" data-cc="${n}">${n}</button>`).join("")}</div>
+    <div class="acciones"><button class="btn sec" data-cerrar>Cancelar</button>
+      <button class="btn" id="c-ok">${prev?"Corregir":"Guardar"}</button></div>`);
+  $$("[data-cc]").forEach(b=>b.onclick=()=>{ $("#c-cant").value=b.dataset.cc; });
+  const guardar=async ()=>{
+    const cant=parseInt($("#c-cant").value,10);
+    if(isNaN(cant)||cant<0){ aviso("Escribe la cantidad."); return; }
+    const b=$("#c-ok"); b.disabled=true;
+    const id=`${zid}__${idDoc(clave)}`;
+    const reg={zonaId:zid, zona:zonaActiva, clave, desc:i.desc||"", cant, quien:quienCuenta, fecha:hoyISO()};
+    try{
+      await setDoc(doc(db,COL_LINEAS,id),reg);
+      const ya=(LINEAS||[]).find(l=>l.id===id);
+      if(ya) Object.assign(ya,reg); else LINEAS.push({id,...reg});
+      cerrarModal(); $("#c-q").value=""; $("#c-res").innerHTML=""; pintarZona();
+    }catch(e){ b.disabled=false; aviso("No se pudo guardar."); }
+  };
+  $("#c-ok").onclick=guardar;
+  $("#c-cant").onkeydown=e=>{ if(e.key==="Enter") guardar(); };
+}
+
+async function borrarLinea(clave){
+  const zid=slugZona(zonaActiva), id=`${zid}__${idDoc(clave)}`;
+  try{ await deleteDoc(doc(db,COL_LINEAS,id));
+    LINEAS=LINEAS.filter(l=>l.id!==id); pintarZona();
+  }catch(e){ aviso("No se pudo quitar."); }
+}
+
+async function moverAqui(clave){
+  const i=porClave.get(clave); if(!i) return;
+  const [u1,u2]=zonaActiva.split(" · ");
+  try{
+    await setDoc(doc(db,COLECCION,idDoc(clave)),{u1:u1||"",u2:u2||"",u3:"",act:hoyISO()},{merge:true});
+    Object.assign(i,{u1:u1||"",u2:u2||"",u3:""});
+    pintarZona(); aviso(`Ubicación corregida a ${zonaActiva}.`,"bien");
+  }catch(e){ aviso("No se pudo corregir la ubicación."); }
+}
+
+async function cerrarZona(){
+  const zid=slugZona(zonaActiva);
+  const faltan=ITEMS.filter(i=>zonaDe(i)===zonaActiva && (i.exist||0)>0)
+                    .filter(i=>!lineasDe(zid).some(l=>l.clave===i.clave)).length;
+  const msg=faltan? `Quedan ${faltan} clave(s) de esta zona sin contar. Se registrarán como cero. ¿Cerrar?`
+                  : "¿Cerrar la zona?";
+  if(!confirm(msg)) return;
+  try{
+    await setDoc(doc(db,COL_CONTEOS,zid),{estado:"cerrada",fin:hoyISO(),cerro:quienCuenta},{merge:true});
+    const c=conteoDe(zid); if(c) Object.assign(c,{estado:"cerrada",fin:hoyISO()});
+    zonaActiva=null; pintarConteo(); aviso("Zona cerrada. Ya puedes ver diferencias.","bien");
+  }catch(e){ aviso("No se pudo cerrar."); }
+}
+
+/* Diferencias: solo aquí aparece la existencia del sistema, y solo de las
+   zonas ya cerradas. Se compara contra la existencia total, no la
+   disponible, porque las piezas apartadas siguen estando físicamente.     */
+async function verDiferencias(){
+  if(!esAdmin && !(await pedirClave())) return;
+  const cerradas=(CONTEOS||[]).filter(c=>c.estado==="cerrada");
+  if(!cerradas.length){ aviso("Todavía no hay zonas cerradas."); return; }
+  /* Una clave puede aparecer en varias zonas. Se suma lo contado en TODAS
+     las zonas cerradas, y solo se compara cuando su zona de origen ya se
+     cerró. Si no, el faltante sería falso: la pieza está en otra zona que
+     todavía no se cuenta.                                                 */
+  const zonasCerradas=new Set(cerradas.map(c=>c.zona));
+  const contado=new Map();
+  cerradas.forEach(c=>lineasDe(c.id).forEach(l=>{
+    if(!contado.has(l.clave)) contado.set(l.clave,{cant:0,zonas:new Set()});
+    const o=contado.get(l.clave); o.cant+=l.cant||0; o.zonas.add(c.zona);
+  }));
+  const difs=[], pendientes=[];
+  const claves=new Set([...contado.keys(),
+    ...ITEMS.filter(i=>(i.exist||0)>0 && zonasCerradas.has(zonaDe(i))).map(i=>i.clave)]);
+  claves.forEach(cl=>{
+    const i=porClave.get(cl); if(!i) return;
+    const o=contado.get(cl)||{cant:0,zonas:new Set()};
+    const casa=zonaDe(i);
+    const zonas=[...new Set([...o.zonas, casa])];
+    const listo=zonas.every(z=>zonasCerradas.has(z));
+    const sis=i.exist||0, d=o.cant-sis;
+    const reg={clave:cl,desc:i.desc,zona:[...o.zonas].join(" + ")||casa,
+      sis,fis:o.cant,d,val:d*(i.p1||0),apart:reservadas(cl),
+      fuera:!o.zonas.has(casa)&&o.cant>0?casa:""};
+    if(!listo){ if(d!==0) pendientes.push(reg); return; }   // falta contar otra zona
+    if(d!==0) difs.push(reg);
+  });
+  difs.sort((a,b)=>Math.abs(b.val)-Math.abs(a.val));
+  const falt=difs.filter(x=>x.d<0), sob=difs.filter(x=>x.d>0);
+  const neto=difs.reduce((s,x)=>s+x.val,0);
+  abrirModal(`<h2>Diferencias</h2>
+    <p class="sub-t">${cerradas.length} zona(s) cerrada(s) · ${difs.length} claves con diferencia</p>
+    <div class="cuenta">
+      <div class="debe"><span>Faltantes</span><b>${falt.length}</b></div>
+      <div class="pagado"><span>Sobrantes</span><b>${sob.length}</b></div>
+      <div class="${neto<0?'debe':'pagado'}"><span>Neto</span><b>${pesos(neto)}</b></div>
+    </div>
+    <p class="nota-precio">Valorado a precio de lista sin IVA. Las piezas apartadas cuentan como existencia: siguen en el anaquel.</p>
+    ${pendientes.length?`<div class="aviso"><b>${pendientes.length} clave(s) no se pueden comparar todavía</b> porque viven en zonas que aún no se cierran. Su diferencia sería falsa.</div>`:""}
+    <div class="lista" style="margin-top:12px">${difs.slice(0,60).map(x=>`
+      <div class="ficha ${x.d<0?'venc':''}">
+        <div class="ficha-top"><span class="clave">${esc(x.clave)}</span>
+          <span class="exist ${x.d<0?'repetida':''}"><b>${x.d>0?"+":""}${x.d}</b> pz</span></div>
+        <div class="desc">${esc(x.desc||"")}</div>
+        <div class="dinero"><span>Sistema ${x.sis}</span><span>Contado ${x.fis}</span>
+          <span class="${x.d<0?'debe':'pagado'}">${pesos(x.val)}</span></div>
+        <div class="mini-dato">${esc(x.zona)}${x.apart?` · ${x.apart} apartada(s)`:""}${x.fuera?` · su lugar es ${esc(x.fuera)}`:""}</div>
+      </div>`).join("")}</div>
+    ${difs.length>60?`<div class="mini-dato" style="text-align:center;padding:8px">Mostrando 60 de ${difs.length}. Descarga el Excel para verlas todas.</div>`:""}
+    <div class="acciones"><button class="btn sec" data-cerrar>Cerrar</button>
+      <button class="btn" id="c-exp">Descargar Excel</button></div>`);
+  $("#c-exp").onclick=()=>{
+    const filas=difs.map(x=>({Clave:x.clave,Descripcion:x.desc||"",Zona:x.zona,
+      "Existencia sistema":x.sis,"Conteo fisico":x.fis,Diferencia:x.d,
+      "Apartadas":x.apart,"Valor diferencia":+x.val.toFixed(2)}));
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(filas),"Diferencias");
+    XLSX.writeFile(wb,`diferencias_inventario_${fechaISO(hoyISO())}.xlsx`);
+  };
+}
 
 /* ============ VENTAS ============
    Cada archivo diario de SAIT se guarda como un documento por fecha. Con
@@ -1381,6 +1660,7 @@ function pintar(){
   if(pestana==="buscar") pintarBuscar();
   if(pestana==="mapa")   pintarMapa();
   if(pestana==="pend")   pintarPend();
+  if(pestana==="conteo") pintarConteo();
   if(pestana==="ventas") pintarVentas();
   if(pestana==="apartados") pintarApartados();
   if(pestana==="negadas") pintarNegadas();
