@@ -274,6 +274,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .ev-caja{background:var(--concreto-2);border-radius:5px;min-height:64px;display:grid;place-items:center;overflow:hidden;padding:8px}
 .ev-caja img{width:100%;max-height:220px;object-fit:contain;border-radius:4px;display:block}
 .con-ev{color:var(--verde);font-weight:700}
+.ficha.resuelta{opacity:.45}
+.ficha.resuelta::after{content:"ya tiene foto";display:block;margin-top:6px;font-size:11px;
+  font-family:Oswald;letter-spacing:.07em;text-transform:uppercase;color:var(--verde)}
 .zona.abierta .est{color:#7A5400}
 .cbar .btn-mini.destacado{margin-left:auto}
 .sec-tit.rojo{color:var(--rojo);border-bottom-color:var(--rojo)}
@@ -2010,6 +2013,20 @@ async function migrarThumb(clave,dataUrl){
   }catch(e){}
 }
 
+/* La marca `foto` del artículo se empezó a guardar después de que ya había
+   fotos tomadas, así que puede venir desfasada. Cuando la lista comprueba
+   que sí existe miniatura, corrige la marca sola y persiste el cambio.   */
+async function marcarConFoto(clave, el){
+  const i=porClave.get(clave);
+  if(!i || i.foto) return;
+  i.foto=true;
+  const n=$("#n-foto"); if(n) n.textContent = ITEMS.filter(x=>(x.exist||0)>0 && !x.foto).length;
+  if(filtro==="sinfoto" && el){        // ya no pertenece a esta lista
+    const card=el.closest(".ficha"); if(card) card.classList.add("resuelta");
+  }
+  try{ await setDoc(doc(db,COLECCION,idDoc(clave)),{foto:true},{merge:true}); }catch(e){}
+}
+
 /* Carga las miniaturas solo cuando la tarjeta entra en pantalla */
 let observador=null;
 function observarThumbs(){
@@ -2020,9 +2037,12 @@ function observarThumbs(){
       const el=e.target; observador.unobserve(el);
       // Solo miniaturas (~10 KB). Bajar la foto grande aquí reventaba la
       // memoria del celular; las que falten se generan desde Sincronizar.
-      const img=await thumbDe(el.dataset.thumb);
-      if(img) el.innerHTML=`<img src="${img}" alt="" loading="lazy">`;
-      else el.classList.add("vacia");
+      const clave=el.dataset.thumb;
+      const img=await thumbDe(clave);
+      if(img){
+        el.innerHTML=`<img src="${img}" alt="" loading="lazy">`;
+        marcarConFoto(clave, el);       // la marca puede venir desfasada
+      } else el.classList.add("vacia");
     });
   },{rootMargin:"200px"});
   $$("[data-thumb]").forEach(el=>observador.observe(el));
@@ -2501,11 +2521,14 @@ $("#nuevo-apa").onclick = elegirPieza;
 $("#btn-indice").onclick = async ()=>{
   const b=$("#btn-indice"); b.disabled=true; b.textContent="Revisando…";
   try{
+    /* Se revisan AMBAS colecciones: hay fotos viejas que nunca generaron
+       miniatura, y quedaban fuera si solo se miraba una.                 */
     const con=new Set();
     for(const col of [COL_THUMBS, COL_FOTOS]){
-      const s=await getDocs(collection(db,col));
-      s.docs.forEach(x=>con.add(decodeURIComponent(x.id)));
-      if(con.size) break;              // con las miniaturas basta
+      try{
+        const s=await getDocs(collection(db,col));
+        s.docs.forEach(x=>{ con.add(x.id); try{ con.add(decodeURIComponent(x.id)); }catch(e){} });
+      }catch(e){}
     }
     let n=0;
     for(let i=0;i<ITEMS.length;i+=400){
