@@ -271,6 +271,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .cbar{display:flex;align-items:center;gap:10px;padding-bottom:10px;border-bottom:1px solid var(--linea)}
 .prog{height:7px;background:var(--concreto-2);border-radius:4px;overflow:hidden;margin-top:12px}
 .prog .barra{height:100%;background:var(--verde);transition:width .3s}
+.ev-caja{background:var(--concreto-2);border-radius:5px;min-height:64px;display:grid;place-items:center;overflow:hidden;padding:8px}
+.ev-caja img{width:100%;max-height:220px;object-fit:contain;border-radius:4px;display:block}
+.con-ev{color:var(--verde);font-weight:700}
 .zona.abierta .est{color:#7A5400}
 .cbar .btn-mini.destacado{margin-left:auto}
 .sec-tit.rojo{color:var(--rojo);border-bottom-color:var(--rojo)}
@@ -496,6 +499,7 @@ const COL_CONFIG = "motopro_config";
 const COL_VENTAS = "motopro_ventas";
 const COL_CONTEOS = "motopro_conteos";
 const COL_LINEAS = "motopro_conteo_lineas";
+const COL_EVIDENCIA = "motopro_evidencia";
 const CLAVE_ADMIN = "motopro2026";   // <-- cámbiala por la que quieras
 const IVA = 0.16;                     // Precio 1 viene sin IVA en SAIT
 
@@ -705,6 +709,29 @@ async function cargarConteo(){
   }catch(e){ TOMAS=TOMAS||[]; LINEAS=LINEAS||[]; }
 }
 const lineasDe = tid => (LINEAS||[]).filter(l=>l.tomaId===tid);
+
+/* Foto de evidencia del conteo: NO es la foto de catálogo del artículo.
+   Documenta cómo estaba el anaquel al momento de contar, para cuando
+   aparezca una diferencia y haya que revisar qué se vio.                 */
+const cacheEvid = new Map();
+const idEvid = (tid,clave) => `${tid}__${idDoc(clave)}`;
+async function evidenciaDe(tid,clave){
+  const id=idEvid(tid,clave);
+  if(cacheEvid.has(id)) return cacheEvid.get(id);
+  try{
+    const s=await getDoc(doc(db,COL_EVIDENCIA,id));
+    const img=s.exists()? s.data().img : null;
+    guardaCache(cacheEvid,id,img,8); return img;
+  }catch(e){ return null; }
+}
+async function verEvidencia(tid,clave,titulo){
+  abrirModal(`<h2>Evidencia</h2><p class="sub-t">${esc(titulo||clave)}</p>
+    <div class="m-foto" id="ev-foto"><div class="m-cargando">Cargando…</div></div>
+    <div class="acciones"><button class="btn sec" data-cerrar>Cerrar</button></div>`);
+  const img=await evidenciaDe(tid,clave);
+  $("#ev-foto").innerHTML = img? `<img src="${img}" alt="">`
+    : `<div class="m-sinfoto"><div>Sin evidencia</div><small>No se tomó foto de este conteo</small></div>`;
+}
 const ubicTxt = i => i && i.u1 ? [i.u1,i.u2,i.u3].filter(Boolean).join(" · ") : "sin ubicar";
 
 async function pintarConteo(){
@@ -857,14 +884,16 @@ function pintarToma(){
             ${l?`<span class="exist"><b>${l.cant}</b> pz</span>`:""}</div>
           <div class="desc">${esc(i?.desc||l?.desc||"")}</div>
           <div class="mini-dato">${esc(ubicTxt(i))}${l&&l.quien?` · contó ${esc(l.quien)}`:""}${
-            l&&!enLista.has(l.clave)?" · fuera de la lista":""}</div>
+            l&&!enLista.has(l.clave)?" · fuera de la lista":""}${l?.foto?` · <span class="con-ev">con foto</span>`:""}</div>
           ${t.estado==="abierta"?`<div class="tags">
             <button class="btn-mini" data-ccap="${esc(l?l.clave:i?.clave)}">${l?"Corregir":"Contar"}</button>
+            ${l?.foto?`<button class="btn-mini" data-cev="${esc(l.clave)}">Ver foto</button>`:""}
             ${l?`<button class="btn-mini negada" data-cdel="${esc(l.clave)}">Quitar</button>`:""}</div>`:""}
         </div>`).join("")}</div>`
         : `<div class="mini-dato" style="padding:8px 2px">${vista==="hechos"?"Nada contado todavía.":"Todo contado."}</div>`);
     $$("[data-ccap]").forEach(b=>b.onclick=()=>capturar(t,b.dataset.ccap));
     $$("[data-cdel]").forEach(b=>b.onclick=()=>borrarLinea(t,b.dataset.cdel));
+    $$("[data-cev]").forEach(b=>b.onclick=()=>verEvidencia(t.id,b.dataset.cev,porClave.get(b.dataset.cev)?.desc));
   };
   $$("[data-cv]").forEach(b=>b.onclick=()=>{ vista=b.dataset.cv;
     $$("[data-cv]").forEach(x=>x.classList.remove("on")); b.classList.add("on"); pintaLista(); });
@@ -897,16 +926,38 @@ function capturar(t,clave){
     <label class="lbl">¿Cuántas piezas hay?</label>
     <input type="number" id="c-cant" value="${prev?prev.cant:""}" inputmode="numeric" step="1" min="0" placeholder="0" autofocus>
     <div class="cants" style="margin-top:8px">${[1,2,3,4,5,6,10,12].map(n=>`<button class="cant" data-cc="${n}">${n}</button>`).join("")}</div>
+    <label class="lbl">Evidencia <span style="text-transform:none;letter-spacing:0">(opcional — foto de lo que contaste)</span></label>
+    <div class="ev-caja" id="ev-prev">${prev?.foto?`<div class="mini-dato">Ya tiene foto. Tomar otra la reemplaza.</div>`:`<div class="mini-dato">Sin foto</div>`}</div>
+    <button class="btn sec" id="c-foto" style="margin-top:8px">Tomar foto</button>
     <div class="acciones"><button class="btn sec" data-cerrar>Cancelar</button>
       <button class="btn" id="c-ok">${prev?"Corregir":"Guardar"}</button></div>`);
+  let evidencia=null;
+  $("#c-foto").onclick=()=>{
+    const inp=document.createElement("input");
+    inp.type="file"; inp.accept="image/*"; inp.capture="environment";
+    inp.onchange=async ()=>{
+      if(!inp.files[0]) return;
+      $("#ev-prev").innerHTML=`<div class="mini-dato">Procesando…</div>`;
+      try{
+        evidencia=await comprimirArchivo(inp.files[0],700,.6);
+        $("#ev-prev").innerHTML=`<img src="${evidencia}" alt="">`;
+      }catch(e){ $("#ev-prev").innerHTML=`<div class="mini-dato">No se pudo leer la foto.</div>`; }
+    };
+    inp.click();
+  };
   $$("[data-cc]").forEach(b=>b.onclick=()=>{ $("#c-cant").value=b.dataset.cc; });
   const guardar=async ()=>{
     const cant=parseInt($("#c-cant").value,10);
     if(isNaN(cant)||cant<0){ aviso("Escribe la cantidad."); return; }
     const b=$("#c-ok"); b.disabled=true;
     const id=`${t.id}__${idDoc(clave)}`;
-    const reg={tomaId:t.id, clave, desc:i.desc||"", cant, quien:quienCuenta, fecha:hoyISO()};
+    const reg={tomaId:t.id, clave, desc:i.desc||"", cant, quien:quienCuenta, fecha:hoyISO(),
+               foto: evidencia? true : !!prev?.foto};
     try{
+      if(evidencia){
+        await setDoc(doc(db,COL_EVIDENCIA,idEvid(t.id,clave)),{img:evidencia,act:hoyISO(),quien:quienCuenta});
+        guardaCache(cacheEvid,idEvid(t.id,clave),evidencia,8);
+      }
       await setDoc(doc(db,COL_LINEAS,id),reg);
       const ya=(LINEAS||[]).find(l=>l.id===id);
       if(ya) Object.assign(ya,reg); else LINEAS.push({id,...reg});
@@ -921,6 +972,8 @@ function capturar(t,clave){
 async function borrarLinea(t,clave){
   const id=`${t.id}__${idDoc(clave)}`;
   try{ await deleteDoc(doc(db,COL_LINEAS,id));
+    try{ await deleteDoc(doc(db,COL_EVIDENCIA,idEvid(t.id,clave))); }catch(e){}
+    cacheEvid.delete(idEvid(t.id,clave));
     LINEAS=LINEAS.filter(l=>l.id!==id); pintarToma();
   }catch(e){ aviso("No se pudo quitar."); }
 }
@@ -948,13 +1001,13 @@ async function verDiferencias(t){
     const fis=l?l.cant:0, d=fis-(a.sis||0);
     if(d!==0) difs.push({clave:a.clave,desc:i?.desc||"",sis:a.sis||0,fis,d,
       val:d*(i?.p1||0),apart:reservadas(a.clave),ubic:ubicTxt(i),
-      nota:l?"":"no se encontró",quien:l?.quien||""});
+      nota:l?"":"no se encontró",quien:l?.quien||"",foto:!!l?.foto});
   });
   ls.filter(l=>!(t.articulos||[]).some(a=>a.clave===l.clave)).forEach(l=>{
     const i=porClave.get(l.clave);
     difs.push({clave:l.clave,desc:i?.desc||l.desc,sis:i?.exist||0,fis:l.cant,
       d:l.cant,val:l.cant*(i?.p1||0),apart:reservadas(l.clave),ubic:ubicTxt(i),
-      nota:"fuera de la lista",quien:l.quien||""});
+      nota:"fuera de la lista",quien:l.quien||"",foto:!!l.foto});
   });
   difs.sort((a,b)=>Math.abs(b.val)-Math.abs(a.val));
   const falt=difs.filter(x=>x.d<0), sob=difs.filter(x=>x.d>0);
@@ -975,14 +1028,17 @@ async function verDiferencias(t){
         <div class="dinero"><span>Sistema ${x.sis}</span><span>Contado ${x.fis}</span>
           <span class="${x.d<0?'debe':'pagado'}">${pesos(x.val)}</span></div>
         <div class="mini-dato">${esc(x.ubic)}${x.apart?` · ${x.apart} apartada(s)`:""}${x.nota?` · ${esc(x.nota)}`:""}${x.quien?` · ${esc(x.quien)}`:""}</div>
+        ${x.foto?`<div class="tags" style="margin-top:8px"><button class="btn-mini" data-dev="${esc(x.clave)}">Ver evidencia</button></div>`:""}
       </div>`).join("")}</div>
     ${difs.length>60?`<div class="mini-dato" style="text-align:center;padding:8px">Mostrando 60 de ${difs.length}. Descarga el Excel para verlas todas.</div>`:""}
     <div class="acciones"><button class="btn sec" data-cerrar>Cerrar</button>
       <button class="btn" id="c-exp">Descargar Excel</button></div>`);
+  $$("[data-dev]").forEach(b=>b.onclick=()=>verEvidencia(t.id,b.dataset.dev,
+    difs.find(x=>x.clave===b.dataset.dev)?.desc));
   $("#c-exp").onclick=()=>{
     const filas=difs.map(x=>({Clave:x.clave,Descripcion:x.desc,Ubicacion:x.ubic,
       "Existencia sistema":x.sis,"Conteo fisico":x.fis,Diferencia:x.d,Apartadas:x.apart,
-      "Valor diferencia":+x.val.toFixed(2),Nota:x.nota,Conto:x.quien}));
+      "Valor diferencia":+x.val.toFixed(2),Nota:x.nota,Conto:x.quien,Evidencia:x.foto?"si":"no"}));
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(filas),"Diferencias");
     XLSX.writeFile(wb,`diferencias_${slugNombre(t.nombre)}_${fechaISO(hoyISO())}.xlsx`);
