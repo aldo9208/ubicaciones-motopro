@@ -738,6 +738,12 @@ async function verEvidencia(tid,clave,titulo){
 const ubicTxt = i => i && i.u1 ? [i.u1,i.u2,i.u3].filter(Boolean).join(" · ") : "sin ubicar";
 
 async function pintarConteo(){
+  try{ await _pintarConteo(); }catch(e){
+    console.error("pintarConteo",e);
+    $("#lista-conteo").innerHTML=`<div class="aviso malo"><b>No se pudo mostrar esta sección.</b><br>${esc(e.message||e)}<br><br>Mándale esta pantalla a quien te da soporte.</div>`;
+  }
+}
+async function _pintarConteo(){
   await cargarConteo();
   if(tomaActiva) return pintarToma();
   $("#resumen-c").innerHTML=`<span>${(TOMAS||[]).length} toma(s)</span>`;
@@ -1082,6 +1088,12 @@ function acumVentas(dias){
 }
 
 async function pintarVentas(){
+  try{ await _pintarVentas(); }catch(e){
+    console.error("pintarVentas",e);
+    $("#lista-ventas").innerHTML=`<div class="aviso malo"><b>No se pudo mostrar esta sección.</b><br>${esc(e.message||e)}<br><br>Mándale esta pantalla a quien te da soporte.</div>`;
+  }
+}
+async function _pintarVentas(){
   await cargarVentas();
   if(!VENTAS.length){
     $("#resumen-v").textContent="";
@@ -1614,6 +1626,12 @@ function avisarApartado(a){
 }
 
 async function pintarApartados(){
+  try{ await _pintarApartados(); }catch(e){
+    console.error("pintarApartados",e);
+    $("#lista-apartados").innerHTML=`<div class="aviso malo"><b>No se pudo mostrar esta sección.</b><br>${esc(e.message||e)}<br><br>Mándale esta pantalla a quien te da soporte.</div>`;
+  }
+}
+async function _pintarApartados(){
   await cargarApartados();
   const act=activos();
   if(!act.length){
@@ -1627,11 +1645,11 @@ async function pintarApartados(){
   const porVencer=act.filter(a=>a.tipo==="apartado" && a.vence && diasPara(a.vence)>=0 && diasPara(a.vence)<=3);
   const pedLlegaron=act.filter(a=>a.tipo==="pedido" && (porClave.get(a.clave)?.exist||0)>0);
   const sinTotal=act.filter(faltaTotal);
+  const pagados=act.filter(estaPagado);
   const resto=act.filter(a=>!vencidos.includes(a)&&!porVencer.includes(a)&&!pedLlegaron.includes(a)&&!sinTotal.includes(a)&&!pagados.includes(a));
   $("#exp-apartados").classList.remove("oculto");
   const dinero=act.reduce((s,a)=>s+fueraDeCaja(a),0);   // lo que traes en mano
   const saldos=act.reduce((s,a)=>s+saldoDe(a),0);
-  const pagados=act.filter(estaPagado);
   $("#resumen-a").innerHTML=`<span>${act.length} activos · ${pesos(dinero)} en anticipos fuera de caja · ${pesos(saldos)} por cobrar${
   pagados.length?` · ${pagados.length} ya pagado(s) en SAIT`:""}</span>`;
 
@@ -1679,6 +1697,12 @@ async function pintarApartados(){
 }
 
 async function pintarNegadas(){
+  try{ await _pintarNegadas(); }catch(e){
+    console.error("pintarNegadas",e);
+    $("#lista-negadas").innerHTML=`<div class="aviso malo"><b>No se pudo mostrar esta sección.</b><br>${esc(e.message||e)}<br><br>Mándale esta pantalla a quien te da soporte.</div>`;
+  }
+}
+async function _pintarNegadas(){
   const n=await cargarNegadas();
   const corte=new Date(Date.now()-diasNeg*864e5).toISOString();
   const r=n.filter(x=>(x.fecha||"")>=corte);
