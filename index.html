@@ -447,6 +447,14 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <button class="btn" id="btn-import" disabled>Procesar archivo</button>
   </div>
   <div class="tarjeta">
+    <h3>Sinónimos de búsqueda</h3>
+    <p>Los nombres con que los clientes piden cada pieza. Un término por renglón, separados por comas. Si la descripción usa cualquiera de ellos, la pieza aparece buscando con los demás.</p>
+    <textarea id="sin-txt" rows="10" style="font-family:'JetBrains Mono';font-size:13px;line-height:1.6"></textarea>
+    <div id="prog-sin"></div>
+    <div style="height:10px"></div>
+    <button class="btn sec" id="btn-sin">Guardar sinónimos</button>
+  </div>
+  <div class="tarjeta">
     <h3>Índice de fotos</h3>
     <p>Recorre las fotos guardadas y marca qué artículos ya tienen. Córrelo una vez desde la computadora; después se mantiene solo.</p>
     <div id="prog-indice"></div>
@@ -455,10 +463,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
   </div>
   <div class="tarjeta">
     <h3>Miniaturas</h3>
-    <p>Genera las miniaturas de las fotos tomadas antes de esta función. Hazlo desde una computadora: procesa de 20 en 20 para no saturar el equipo.</p>
+    <p>Las fotos tomadas antes de esta función no tienen miniatura, por eso salen en gris en la lista aunque sí tengan foto. Esto las genera todas. Hazlo desde una computadora y deja la pestaña abierta.</p>
     <div id="prog-thumbs"></div>
     <div style="height:10px"></div>
-    <button class="btn sec" id="btn-thumbs">Generar 20 miniaturas</button>
+    <button class="btn sec" id="btn-thumbs">Generar miniaturas faltantes</button>
   </div>
   <div class="tarjeta">
     <h3>Estado de los datos</h3>
@@ -562,12 +570,6 @@ function partirUbic(u1,u2,u3){
    2. SAIT exporta la Ñ, Ü y Ó corrompidas (CIG▄EÐAL en vez de CIGÜEÑAL).
    3. La misma pieza tiene dos nombres (SPROCKET / ENGRANE / CATALINA).      */
 const MOJIBAKE = {"Ð":"N","▄":"U","Ë":"O","¾":"O"};
-const SINONIMOS = {
-  BALATA:["ZAPATA"], SPROCKET:["ENGRANE","CATALINA","CORONA"],
-  ESPEJO:["RETROVISOR"], CALAVERA:["STOP"], DIRECCIONAL:["INTERMITENTE"],
-  LLANTA:["NEUMATICO"], MANIJA:["PALANCA"], CAMARA:["TRIPA"],
-  AMORTIGUADOR:["SUSPENSION"], FARO:["LUZ DELANTERA"]
-};
 function normTexto(s){
   s = String(s||"");
   for(const [a,b] of Object.entries(MOJIBAKE)){ if(a) s = s.split(a).join(b); }
@@ -575,6 +577,44 @@ function normTexto(s){
   s = s.replace(/(\d)[.,](\d)/g,"$1$2");   // medidas: 2.50-17 -> 250 17
   return s.replace(/[^A-Z0-9]+/g," ").replace(/\s+/g," ").trim();
 }
+
+/* Grupos de sinónimos: todos los términos de un grupo son equivalentes al
+   buscar. Si la descripción dice RELEVADOR y el cliente pide "monito", la
+   pieza aparece igual. Editables desde Sincronizar, porque el habla cambia
+   de una región a otra y esta lista solo la puede afinar quien atiende.  */
+const SINONIMOS_BASE = [
+  ["RELEVADOR","SOLENOIDE","SELENOIDE","MONITO","RELAY"],
+  ["BALATA","ZAPATA","PASTILLA"],
+  ["SPROCKET","ENGRANE","CATALINA","CORONA","PIÑON"],
+  ["CAMARA","TRIPA"],
+  ["LLANTA","NEUMATICO","GOMA"],
+  ["CALAVERA","STOP","LUZ TRASERA"],
+  ["DIRECCIONAL","INTERMITENTE","CUARTO"],
+  ["ESPEJO","RETROVISOR"],
+  ["MANIJA","PALANCA","MANERAL"],
+  ["AMORTIGUADOR","SUSPENSION"],
+  ["ACUMULADOR","BATERIA","PILA"],
+  ["SWITCH","INTERRUPTOR","CHAPA"],
+  ["CLAXON","BOCINA","CORNETA"],
+  ["ESCAPE","MOFLE","SILENCIADOR"],
+  ["RETEN","SELLO","ESTOPERA"],
+  ["BALERO","RODAMIENTO","BALIN"],
+  ["RIN","ARO"],
+  ["RAYOS","RADIOS"],
+  ["CDI","CEREBRO","MODULO"],
+  ["VELOCIMETRO","TABLERO","CUENTA KILOMETROS","MARCADOR"],
+  ["EMPAQUE","JUNTA"],
+  ["PISTON","EMBOLO"],
+  ["TENSOR","TEMPLADOR"],
+  ["HORQUILLA","TIJERA"],
+  ["POSAPIE","ESTRIBO"],
+  ["PUÑO","CACHA"],
+  ["FARO","LUZ DELANTERA"],
+  ["BIRLO","TORNILLO","ESPARRAGO"],
+  ["CARBURADOR","CARBU"],
+  ["ARNES","RAMAL","CABLEADO"]
+];
+let SINONIMOS = SINONIMOS_BASE.map(g=>g.map(t=>normTexto(t)));
 const colapsar = s => s.replace(/[^A-Z0-9]/g,"");
 /* ============ MODELOS DE MOTO ============
    Detecta a qué motos aplica cada refacción. Solo acepta cilindradas reales
@@ -598,9 +638,8 @@ function modelosDe(textoNormalizado){
 function construirIndice(i){
   const n = normTexto(i.clave+" "+(i.desc||"")+" "+(i.cb||""));
   let ext = n;
-  for(const [k,vs] of Object.entries(SINONIMOS)){
-    if(n.includes(k)) ext += " "+vs.join(" ");
-    for(const v of vs) if(n.includes(v)) ext += " "+k;
+  for(const g of SINONIMOS){
+    if(g.some(t=>n.includes(t))) ext += " "+g.join(" ");
   }
   i._texto    = ext;              // con espacios: para términos normales
   i._colapsado = colapsar(ext);   // sin separadores: solo para modelos
@@ -612,6 +651,9 @@ function construirIndice(i){
    se consulta cuando el término mezcla letras y dígitos, como un modelo.     */
 function coincide(i,t){
   if(i._texto.includes(t)) return true;
+  // Plurales: el cliente dice "zapatas" y el sinónimo está en singular
+  if(t.length>4 && t.endsWith("ES") && i._texto.includes(t.slice(0,-2))) return true;
+  if(t.length>3 && t.endsWith("S")  && i._texto.includes(t.slice(0,-1))) return true;
   const pareceModelo = /[A-Z]/.test(t) && /\d/.test(t);
   return pareceModelo && i._colapsado.includes(colapsar(t));
 }
@@ -650,6 +692,9 @@ async function recargar(){
     pintarTipos(); pintarMotos();
     $("#n-of").textContent = ITEMS.filter(i=>descuentoDe(i)>0).length;
     $("#n-foto").textContent = ITEMS.filter(i=>(i.exist||0)>0 && !i.foto).length;
+    await cargarSinonimos();
+    ITEMS.forEach(construirIndice);
+    pintarSinonimos();
     await cargarOfertas();
     await cargarApartados();
     $("#n-apa").textContent = activos().length;
@@ -2493,7 +2538,10 @@ $("#btn-import").onclick = async ()=>{
   if(filasImport.ofertas){
     try{
       await setDoc(doc(db,COL_CONFIG,"ofertas"),{lista:filasImport.ofertas,act:hoyISO()});
-      await cargarOfertas();
+      await cargarSinonimos();
+    ITEMS.forEach(construirIndice);
+    pintarSinonimos();
+    await cargarOfertas();
       $("#n-of").textContent = ITEMS.filter(i=>descuentoDe(i)>0).length;
     $("#n-foto").textContent = ITEMS.filter(i=>(i.exist||0)>0 && !i.foto).length;
       pintar();
@@ -2542,6 +2590,36 @@ $("#nuevo-apa").onclick = elegirPieza;
 /* Diagnóstico: dice exactamente qué archivo faltó, en vez de dejarte adivinar */
 /* Una sola pasada por la colección de fotos para marcar cuáles ya existen.
    Descarga las imágenes, así que conviene hacerlo desde una computadora.  */
+/* Los sinónimos viven en Firestore para que se puedan editar sin tocar el
+   código y para que todos los equipos usen la misma lista.               */
+async function cargarSinonimos(){
+  try{
+    const s=await getDoc(doc(db,COL_CONFIG,"sinonimos"));
+    if(s.exists() && Array.isArray(s.data().grupos) && s.data().grupos.length)
+      SINONIMOS = s.data().grupos.map(g=>g.map(t=>normTexto(t)).filter(Boolean)).filter(g=>g.length>1);
+  }catch(e){}
+}
+function pintarSinonimos(){
+  const ta=$("#sin-txt"); if(!ta) return;
+  ta.value = SINONIMOS.map(g=>g.join(", ")).join("\n");
+}
+$("#btn-sin").onclick = async ()=>{
+  if(!esAdmin && !(await pedirClave())) return;
+  const b=$("#btn-sin"); b.disabled=true; b.textContent="Guardando…";
+  const grupos=$("#sin-txt").value.split("\n")
+    .map(l=>l.split(",").map(t=>normTexto(t)).filter(Boolean))
+    .filter(g=>g.length>1);
+  try{
+    await setDoc(doc(db,COL_CONFIG,"sinonimos"),{grupos,act:hoyISO()});
+    SINONIMOS=grupos;
+    ITEMS.forEach(construirIndice);          // reconstruye la búsqueda
+    if(NEGADAS) NEGADAS.forEach(construirIndice);
+    pintar();
+    $("#prog-sin").innerHTML=`<div class="aviso bien">${grupos.length} grupo(s) guardados. La búsqueda ya los usa.</div>`;
+  }catch(e){ $("#prog-sin").innerHTML=`<div class="aviso malo">${esc(e.message)}</div>`; }
+  b.disabled=false; b.textContent="Guardar sinónimos";
+};
+
 $("#btn-indice").onclick = async ()=>{
   const b=$("#btn-indice"); b.disabled=true; b.textContent="Revisando…";
   try{
@@ -2570,26 +2648,40 @@ $("#btn-indice").onclick = async ()=>{
   b.disabled=false; b.textContent="Revisar fotos existentes";
 };
 
+/* Genera las miniaturas que faltan. Solo recorre los artículos marcados con
+   foto, así no consulta las 2,777 claves. Descarga la foto grande, la reduce
+   y la suelta enseguida: el caché está topado en 3, así que la memoria no
+   crece aunque procese cientos.                                           */
+let pararThumbs=false;
 $("#btn-thumbs").onclick = async ()=>{
-  const b=$("#btn-thumbs"); b.disabled=true;
-  let hechas=0, revisadas=0;
-  try{
-    for(const i of ITEMS){
-      if(hechas>=20) break;
-      revisadas++;
-      b.textContent=`Revisando ${revisadas}…`;
-      if(await thumbDe(i.clave)) continue;         // ya tiene
+  const b=$("#btn-thumbs");
+  if(b.dataset.corriendo){ pararThumbs=true; return; }
+  const conFoto=ITEMS.filter(i=>i.foto);
+  if(!conFoto.length){
+    $("#prog-thumbs").innerHTML=`<div class="aviso">Ningún artículo está marcado con foto. Corre primero <b>Revisar fotos existentes</b> aquí arriba.</div>`;
+    return;
+  }
+  pararThumbs=false; b.dataset.corriendo="1"; b.textContent="Detener";
+  let hechas=0, saltadas=0, fallas=0, n=0;
+  for(const i of conFoto){
+    if(pararThumbs) break;
+    n++;
+    $("#prog-thumbs").innerHTML=`<div class="aviso"><b>${n} de ${conFoto.length}</b> · ${hechas} generada(s), ${saltadas} ya tenían</div>`;
+    try{
+      if(await thumbDe(i.clave)){ saltadas++; continue; }
       const full=await fotoDe(i.clave);
-      if(!full) continue;                          // no tiene foto
+      if(!full){ fallas++; continue; }
       const t=await reducir(full,260,.6);
       await setDoc(doc(db,COL_THUMBS,idDoc(i.clave)),{img:t,act:hoyISO()});
       guardaCache(cacheThumbs,i.clave,t,TOPE_THUMBS);
-      cacheFotos.delete(i.clave);
+      cacheFotos.delete(i.clave);       // suelta la grande de inmediato
       hechas++;
-    }
-    $("#prog-thumbs").innerHTML=`<div class="aviso bien">${hechas} miniatura(s) generada(s) de ${revisadas} artículos revisados.${hechas>=20?" Vuelve a pulsar para seguir.":" Ya no quedan pendientes."}</div>`;
-  }catch(e){ $("#prog-thumbs").innerHTML=`<div class="aviso malo">${esc(e.message)}</div>`; }
-  b.disabled=false; b.textContent="Generar 20 miniaturas";
+    }catch(e){ fallas++; }
+  }
+  delete b.dataset.corriendo; b.textContent="Generar miniaturas faltantes"; pararThumbs=false;
+  $("#prog-thumbs").innerHTML=`<div class="aviso bien"><b>Listo.</b> ${hechas} miniatura(s) generada(s), ${saltadas} ya tenían${fallas?`, ${fallas} sin foto o con error`:""}.${
+    n<conFoto.length?` Se detuvo en ${n} de ${conFoto.length}.`:""}</div>`;
+  pintar();
 };
 
 $("#btn-diag").onclick = async ()=>{
