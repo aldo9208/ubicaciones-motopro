@@ -319,6 +319,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .r-btn.ok{background:var(--verde);border-color:var(--verde);color:#fff}
 .r-btn:active{background:var(--tinta);color:#fff}
 .ok-txt{color:var(--verde)}
+.banner{display:flex;align-items:center;gap:10px;background:var(--ambar-claro);
+  border-bottom:2px solid var(--ambar);padding:9px 14px;font-size:13px;line-height:1.35;color:#5C3D00}
+.banner.malo{background:#FDECEA;border-bottom-color:var(--rojo);color:var(--rojo);font-weight:600}
+.banner button{margin-left:auto;border:0;background:none;font-size:15px;opacity:.6;padding:0 4px}
 @media(max-width:700px){
   .ren{flex-wrap:wrap;gap:4px 8px;padding:8px 11px}
   .r-pri,.r-cla{flex:0 0 auto}
@@ -543,7 +547,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, getDocs, getDoc, doc, setDoc, deleteDoc, writeBatch
+  collection, getDocs, getDocsFromCache, getDoc, doc, setDoc, deleteDoc, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ============ CONFIGURACIÓN ============ */
@@ -721,6 +725,40 @@ const idDoc = clave => encodeURIComponent(String(clave).trim()).replace(/\./g,"%
 const TOPE_LISTA = (window.innerWidth<600 || navigator.deviceMemory<=4) ? 60 : 250;
 const esc = s => String(s??"").replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+/* Firestore con caché persistente puede quedarse esperando al servidor sin
+   fallar nunca: la pantalla se queda en "Cargando…" para siempre. Este
+   helper corta a los 12 segundos y sirve lo que haya en el caché local.  */
+async function traer(nombreCol, segundos=12){
+  const ref=collection(db,nombreCol);
+  try{
+    return await Promise.race([
+      getDocs(ref),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error("TIMEOUT")),segundos*1000))
+    ]);
+  }catch(e){
+    if(e.message==="TIMEOUT"){
+      try{
+        const c=await getDocsFromCache(ref);
+        avisoGlobal(`Sin respuesta del servidor. Mostrando datos guardados en este equipo (${c.size} registros de "${nombreCol}"). Puede haber información desactualizada.`);
+        return c;
+      }catch(e2){ throw new Error(`No hubo respuesta al pedir "${nombreCol}" y no hay copia local.`); }
+    }
+    throw e;
+  }
+}
+
+/* Banner visible en cualquier pestaña: el error ya no se esconde en Buscar */
+function avisoGlobal(msg, malo){
+  let b=$("#banner");
+  if(!b){
+    b=document.createElement("div"); b.id="banner";
+    document.querySelector(".tabs").insertAdjacentElement("afterend",b);
+  }
+  b.className="banner "+(malo?"malo":"");
+  b.innerHTML=`<span>${esc(msg)}</span><button id="banner-x" title="Cerrar">✕</button>`;
+  $("#banner-x").onclick=()=>b.remove();
+}
+
 function estado(txt, clase){ $("#txt-estado").textContent=txt; $("#punto").className="punto "+(clase||""); }
 
 /* ============ ARRANQUE ============ */
@@ -737,7 +775,7 @@ function estado(txt, clase){ $("#txt-estado").textContent=txt; $("#punto").class
 
 async function recargar(){
   try{
-    const snap = await getDocs(collection(db, COLECCION));
+    const snap = await traer(COLECCION);
     ITEMS = snap.docs.map(d=>d.data());
     porClave = new Map(ITEMS.map(i=>[i.clave,i]));
     ITEMS.forEach(construirIndice);
@@ -755,7 +793,13 @@ async function recargar(){
     pintar();
   }catch(e){
     estado("Error","err");
-    $("#res").innerHTML = `<div class="aviso malo"><b>No se pudo cargar el catálogo.</b><br>${esc(e.message)}<br><br>Revisa la conexión y vuelve a abrir la app.</div>`;
+    console.error("recargar",e);
+    avisoGlobal(`No se pudo cargar el catálogo: ${e.message||e}`,true);
+    const cuerpo=`<div class="aviso malo"><b>No se pudo cargar el catálogo.</b><br>${esc(e.message||e)}<br><br>
+      Cierra la pestaña, vuelve a abrirla y si sigue igual manda esta pantalla a soporte.</div>`;
+    ["res","lista-negadas","lista-apartados","lista-ventas","lista-conteo"].forEach(id=>{
+      const el=$("#"+id); if(el) el.innerHTML=cuerpo;
+    });
   }
 }
 
@@ -804,7 +848,7 @@ let TOMAS=null, LINEAS=null, tomaActiva=null, quienCuenta="";
 async function cargarConteo(){
   if(TOMAS && LINEAS) return;
   try{
-    const [a,b]=await Promise.all([getDocs(collection(db,COL_CONTEOS)),getDocs(collection(db,COL_LINEAS))]);
+    const [a,b]=await Promise.all([traer(COL_CONTEOS),traer(COL_LINEAS)]);
     TOMAS=a.docs.map(d=>({id:d.id,...d.data()})).sort((x,y)=>(y.fecha||"").localeCompare(x.fecha||""));
     LINEAS=b.docs.map(d=>({id:d.id,...d.data()}));
   }catch(e){ TOMAS=TOMAS||[]; LINEAS=LINEAS||[]; }
@@ -837,7 +881,7 @@ const ubicTxt = i => i && i.u1 ? [i.u1,i.u2,i.u3].filter(Boolean).join(" · ") :
 
 async function pintarConteo(){
   try{ await _pintarConteo(); }catch(e){
-    console.error("pintarConteo",e);
+    console.error("pintarConteo",e); avisoGlobal("Error en Conteo: "+(e.message||e),true);
     $("#lista-conteo").innerHTML=`<div class="aviso malo"><b>No se pudo mostrar esta sección.</b><br>${esc(e.message||e)}<br><br>Mándale esta pantalla a quien te da soporte.</div>`;
   }
 }
@@ -1164,7 +1208,7 @@ let VENTAS=null, diasVta=30;
 async function cargarVentas(){
   if(VENTAS) return VENTAS;
   try{
-    const s=await getDocs(collection(db,COL_VENTAS));
+    const s=await traer(COL_VENTAS);
     VENTAS=s.docs.map(d=>({fecha:d.id,...d.data()})).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   }catch(e){ VENTAS=[]; }
   return VENTAS;
@@ -1187,7 +1231,7 @@ function acumVentas(dias){
 
 async function pintarVentas(){
   try{ await _pintarVentas(); }catch(e){
-    console.error("pintarVentas",e);
+    console.error("pintarVentas",e); avisoGlobal("Error en Ventas: "+(e.message||e),true);
     $("#lista-ventas").innerHTML=`<div class="aviso malo"><b>No se pudo mostrar esta sección.</b><br>${esc(e.message||e)}<br><br>Mándale esta pantalla a quien te da soporte.</div>`;
   }
 }
@@ -1298,7 +1342,7 @@ async function registrarNegada({clave,texto}){
 async function cargarNegadas(){
   if(NEGADAS) return NEGADAS;
   try{
-    const s=await getDocs(collection(db,COL_NEGADAS));
+    const s=await traer(COL_NEGADAS);
     NEGADAS=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
   }catch(e){ NEGADAS=[]; }
   NEGADAS.forEach(construirIndice);
@@ -1360,7 +1404,7 @@ async function avisar(reg){
 
 async function pintarNegadas(){
   try{ await _pintarNegadas(); }catch(e){
-    console.error("pintarNegadas",e);
+    console.error("pintarNegadas",e); avisoGlobal("Error en Negadas: "+(e.message||e),true);
     $("#lista-negadas").innerHTML=`<div class="aviso malo"><b>No se pudo mostrar esta sección.</b><br>${esc(e.message||e)}<br><br>Mándale esta pantalla a quien te da soporte.</div>`;
   }
 }
@@ -2288,7 +2332,7 @@ $("#btn-indice").onclick = async ()=>{
     const con=new Set();
     for(const col of [COL_THUMBS, COL_FOTOS]){
       try{
-        const s=await getDocs(collection(db,col));
+        const s=await traer(col,30);
         s.docs.forEach(x=>{ con.add(x.id); try{ con.add(decodeURIComponent(x.id)); }catch(e){} });
       }catch(e){}
     }
