@@ -323,6 +323,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
   border-bottom:2px solid var(--ambar);padding:9px 14px;font-size:13px;line-height:1.35;color:#5C3D00}
 .banner.malo{background:#FDECEA;border-bottom-color:var(--rojo);color:var(--rojo);font-weight:600}
 .banner button{margin-left:auto;border:0;background:none;font-size:15px;opacity:.6;padding:0 4px}
+.tarjeta.peligro{border-color:var(--rojo);border-left:4px solid var(--rojo)}
+.rojo-txt{color:var(--rojo)}
 @media(max-width:700px){
   .ren{flex-wrap:wrap;gap:4px 8px;padding:8px 11px}
   .r-pri,.r-cla{flex:0 0 auto}
@@ -501,6 +503,14 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <div id="prev-import"></div>
     <div style="height:12px"></div>
     <button class="btn" id="btn-import" disabled>Procesar archivo</button>
+  </div>
+  <div class="tarjeta peligro">
+    <h3>Limpiar el catálogo</h3>
+    <p>Si por error se importó el inventario de otro negocio, aquí se quita. Sube el archivo <b>correcto y completo</b> de Moto Pro: lo que no esté en él se borra del catálogo. Las claves con ubicación, foto, apartado o venta negada quedan protegidas.</p>
+    <input type="file" id="limp-file" accept=".xlsx,.xls,.csv" style="width:100%">
+    <div id="limp-prev"></div>
+    <div style="height:10px"></div>
+    <button class="btn sec" id="btn-limp" disabled>Borrar claves que sobran</button>
   </div>
   <div class="tarjeta">
     <h3>Sinónimos de búsqueda</h3>
@@ -746,7 +756,7 @@ const esc = s => String(s??"").replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">
 /* Firestore con caché persistente puede quedarse esperando al servidor sin
    fallar nunca: la pantalla se queda en "Cargando…" para siempre. Este
    helper corta a los 12 segundos y sirve lo que haya en el caché local.  */
-async function traer(nombreCol, segundos=12){
+async function traer(nombreCol, segundos=40){
   const ref=collection(db,nombreCol);
   try{
     return await Promise.race([
@@ -2629,8 +2639,17 @@ $("#archivo").onchange = async e=>{
       filasImport.push(o);
     }
     const nuevas = filasImport.filter(x=>!porClave.has(x.clave));
+    /* Si casi todo es nuevo y el catálogo ya estaba poblado, lo más probable
+       es que sea el archivo de otro negocio. Se avisa antes de escribir.   */
+    const pctNuevas = filasImport.length? nuevas.length/filasImport.length : 0;
+    const sospechoso = ITEMS.length>500 && pctNuevas>0.5 && nuevas.length>200;
     const sinPrecio = traePrecio ? filasImport.filter(x=>!x.p1||x.p1<=0).length : 0;
-    $("#prev-import").innerHTML = `<div class="aviso bien">
+    $("#prev-import").innerHTML = (sospechoso?`<div class="aviso malo">
+      <b>Cuidado: ${Math.round(pctNuevas*100)}% de las claves de este archivo no están en el catálogo.</b><br>
+      Si esperabas actualizar existencias de Moto Pro, este archivo probablemente es de otro negocio.
+      Guardarlo mezclaría ${nuevas.length} claves ajenas que después hay que borrar a mano.<br>
+      <b>Revisa el nombre del archivo antes de continuar.</b></div>`:"")+
+      `<div class="aviso bien">
       <b>${filasImport.length} filas leídas.</b><br>
       ${nuevas.length} claves nuevas · ${filasImport.length-nuevas.length} ya en el catálogo<br>
       ${traeUbic?"Trae ubicaciones: se actualizarán.":""}
@@ -2639,11 +2658,96 @@ $("#archivo").onchange = async e=>{
       ${!traeUbic&&!traePrecio&&!traeCat?"Solo descripción y existencias.":""}
       ${corregidas?`<br>${corregidas} clave(s) corregida(s) por daño de Excel.`:""}
     </div>`;
+    filasImport.sospechoso=sospechoso; filasImport.nuevasN=nuevas.length;
     $("#btn-import").disabled=false;
   }catch(err){
     filasImport=null; $("#btn-import").disabled=true;
     $("#prev-import").innerHTML=`<div class="aviso malo"><b>No se pudo leer el archivo.</b><br>${esc(err.message)}</div>`;
   }
+};
+
+/* ============ LIMPIEZA DEL CATÁLOGO ============
+   Si se importa por error el inventario de otro negocio, sus claves quedan
+   mezcladas: la importación agrega con merge y nunca borra. Esto compara el
+   catálogo contra el archivo correcto y elimina lo que sobra.
+   Nunca borra a ciegas: primero muestra qué se va, y protege cualquier clave
+   que tenga trabajo encima (ubicación, foto, apartado o venta negada).   */
+let sobrantes=null;
+
+$("#limp-file").onchange = async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  $("#limp-prev").innerHTML='<div class="resumen">Leyendo archivo…</div>';
+  $("#btn-limp").disabled=true; sobrantes=null;
+  try{
+    const wb=XLSX.read(await f.arrayBuffer(),{type:"array"});
+    const br=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:null});
+    let hi=-1;
+    for(let r=0;r<Math.min(20,br.length);r++)
+      if((br[r]||[]).map(c=>normTexto(c)).includes("CLAVE")){ hi=r; break; }
+    if(hi<0) throw new Error("No encontré una columna llamada 'Clave'.");
+    const ic=(br[hi]||[]).map(c=>normTexto(c)).indexOf("CLAVE");
+    const buenas=new Set();
+    for(let r=hi+1;r<br.length;r++){
+      let v=String((br[r]||[])[ic]??"").trim();
+      if(!v || v.toUpperCase()==="NAN") continue;
+      buenas.add(CLAVES_CORREGIDAS[v]||v);
+    }
+    if(buenas.size<50) throw new Error(`Solo encontré ${buenas.size} claves. Revisa que sea el archivo completo.`);
+
+    await cargarApartados(); await cargarNegadas();
+    const conApartado=new Set((APARTADOS||[]).map(a=>a.clave).filter(Boolean));
+    const conNegada=new Set((NEGADAS||[]).map(x=>x.clave).filter(Boolean));
+    const fuera=ITEMS.filter(i=>!buenas.has(i.clave));
+    const tocadas=fuera.filter(i=>i.u1 || i.foto || conApartado.has(i.clave) || conNegada.has(i.clave));
+    const limpias=fuera.filter(i=>!tocadas.includes(i));
+    sobrantes={limpias,tocadas,buenas:buenas.size};
+
+    $("#limp-prev").innerHTML=`
+      <div class="aviso ${fuera.length?"":"bien"}">
+        <b>${buenas.size} claves en el archivo</b> · ${ITEMS.length} en la app<br>
+        ${fuera.length? `<b class="rojo-txt">${fuera.length} claves sobran</b> y se pueden borrar.`
+                      : "No sobra ninguna clave. El catálogo ya está limpio."}
+      </div>
+      ${tocadas.length?`<div class="aviso malo"><b>${tocadas.length} de las sobrantes tienen trabajo encima</b>
+        (ubicación, foto, apartado o venta negada). Esas NO se borran, por si son de Moto Pro y
+        faltan en el archivo. Revísalas aparte.</div>`:""}
+      ${limpias.length?`<div class="mini-dato" style="margin-top:8px">Primeras que se borrarían:</div>
+        <div class="lista" style="margin-top:6px;max-height:190px;overflow-y:auto">${
+          limpias.slice(0,25).map(i=>`<div class="ren"><span class="r-cla">${esc(i.clave)}</span>
+            <span class="r-sec">${esc(i.desc||"")}</span>
+            <span class="r-num">${i.exist||0}<em>pz</em></span></div>`).join("")}</div>`:""}`;
+    $("#btn-limp").disabled=!limpias.length;
+    $("#btn-limp").textContent=limpias.length?`Borrar ${limpias.length} claves que sobran`:"Nada que borrar";
+  }catch(err){
+    sobrantes=null; $("#btn-limp").disabled=true;
+    $("#limp-prev").innerHTML=`<div class="aviso malo"><b>No se pudo leer el archivo.</b><br>${esc(err.message)}</div>`;
+  }
+};
+
+$("#btn-limp").onclick = async ()=>{
+  if(!sobrantes || !sobrantes.limpias.length) return;
+  if(!esAdmin && !(await pedirClave())) return;
+  const n=sobrantes.limpias.length;
+  const resp=prompt(`Se van a borrar ${n} claves del catálogo. Esto no se puede deshacer.\n\nEscribe BORRAR para confirmar:`);
+  if(resp!=="BORRAR"){ aviso("Cancelado. No se borró nada."); return; }
+  const b=$("#btn-limp"); b.disabled=true;
+  let hechas=0;
+  try{
+    for(let s=0;s<sobrantes.limpias.length;s+=400){
+      const trozo=sobrantes.limpias.slice(s,s+400);
+      const lote=writeBatch(db);
+      trozo.forEach(i=>lote.delete(doc(db,COLECCION,idDoc(i.clave))));
+      await lote.commit();
+      hechas+=trozo.length;
+      b.textContent=`Borrando ${hechas} / ${n}…`;
+    }
+    $("#limp-prev").innerHTML=`<div class="aviso bien"><b>${hechas} claves borradas.</b> El catálogo quedó limpio.</div>`;
+    sobrantes=null; $("#limp-file").value="";
+    await recargar();
+  }catch(e){
+    $("#limp-prev").innerHTML=`<div class="aviso malo"><b>Se interrumpió tras borrar ${hechas}.</b><br>${esc(e.message)}<br>Vuelve a subir el archivo y repite.</div>`;
+  }
+  b.disabled=false; b.textContent="Borrar claves que sobran";
 };
 
 $("#btn-import").onclick = async ()=>{
@@ -2673,6 +2777,10 @@ $("#btn-import").onclick = async ()=>{
       $("#prev-import").innerHTML=`<div class="aviso bien"><b>Ofertas guardadas.</b> Ya se aplican en los precios.</div>`;
     }catch(e){ $("#prev-import").innerHTML=`<div class="aviso malo">${esc(e.message)}</div>`; }
     b.disabled=false; return;
+  }
+  if(filasImport.sospechoso){
+    const r=prompt(`Este archivo agregaría ${filasImport.nuevasN} claves que no están en el catálogo.\n\nSi es el inventario de otro negocio, se van a mezclar.\n\nEscribe SI para continuar:`);
+    if(r!=="SI"){ b.disabled=false; aviso("Cancelado. No se guardó nada."); return; }
   }
   let hechas=0, nuevas=0;
   try{
