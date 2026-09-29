@@ -279,6 +279,54 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
   font-family:Oswald;letter-spacing:.07em;text-transform:uppercase;color:var(--verde)}
 .zona.abierta .est{color:#7A5400}
 .cbar .btn-mini.destacado{margin-left:auto}
+
+/* ---------- Listas densas de negadas ----------
+   255 registros en tarjetas es imposible de revisar. Un renglón por
+   registro, con las columnas alineadas para poder barrer la vista.      */
+.secc{margin-bottom:10px;border:1px solid var(--linea);border-radius:var(--r);overflow:hidden;background:var(--superficie)}
+.secc-cab{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:0;
+  background:var(--tinta);color:#fff;padding:10px 13px}
+.secc-cab .flecha{font-size:11px;opacity:.7;width:10px}
+.secc-tit{font-family:Oswald;font-size:13.5px;letter-spacing:.07em;text-transform:uppercase}
+.secc-num{font-family:'JetBrains Mono';font-size:11px;font-weight:700;background:rgba(255,255,255,.16);
+  border-radius:9px;padding:1px 8px}
+.secc-alerta{margin-left:auto;font-family:Oswald;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  background:var(--verde);color:#fff;border-radius:3px;padding:2px 7px}
+.secc-cuerpo{max-height:440px;overflow-y:auto}
+
+.ren{display:flex;align-items:center;gap:9px;padding:7px 12px;border-bottom:1px solid var(--concreto);
+  font-size:13px;line-height:1.3}
+.ren:last-child{border-bottom:0}
+.ren:nth-child(even){background:#FAFBFC}
+.ren.ok{background:#F2FAF6}
+.r-pri{font-weight:600;flex:0 0 150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r-cla{font-family:'JetBrains Mono';font-size:11.5px;font-weight:700;flex:0 0 108px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r-sec{flex:1;min-width:0;color:var(--tinta-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r-sec.ancho{font-weight:500;color:var(--tinta)}
+.r-num{flex:0 0 74px;text-align:right;font-family:'JetBrains Mono';font-size:12px;font-weight:700;white-space:nowrap}
+.r-num em{font-style:normal;font-size:9.5px;font-weight:400;color:var(--tinta-2);margin-left:2px}
+.r-num.alto{color:var(--rojo)}
+.r-ubi{flex:0 0 120px;font-family:Oswald;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--tinta-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r-hoy{flex:0 0 32px;text-align:right;font-family:'JetBrains Mono';font-size:12px;font-weight:700;color:#98A0AB}
+.r-hoy.ok{color:var(--verde)}
+.r-est{flex:0 0 96px;font-family:Oswald;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--tinta-2)}
+.r-est.ok{color:var(--verde);font-weight:600}
+.r-fec{flex:0 0 74px;text-align:right;font-size:11px;color:var(--tinta-2);white-space:nowrap}
+.r-btn{flex:0 0 auto;border:1px solid var(--linea);background:var(--superficie);border-radius:3px;
+  padding:4px 9px;font-family:Oswald;font-size:11px;letter-spacing:.06em;color:var(--tinta-2)}
+.r-btn.ok{background:var(--verde);border-color:var(--verde);color:#fff}
+.r-btn:active{background:var(--tinta);color:#fff}
+.ok-txt{color:var(--verde)}
+@media(max-width:700px){
+  .ren{flex-wrap:wrap;gap:4px 8px;padding:8px 11px}
+  .r-pri,.r-cla{flex:0 0 auto}
+  .r-sec{flex:1 0 100%;order:5;white-space:normal;font-size:12.5px}
+  .r-ubi{flex:0 0 auto;order:6}
+  .r-hoy,.r-num,.r-est,.r-fec{flex:0 0 auto}
+  .secc-cuerpo{max-height:none}
+}
 .sec-tit.rojo{color:var(--rojo);border-bottom-color:var(--rojo)}
 .sec-tit.verde{color:var(--verde);border-bottom-color:var(--verde)}
 .sel-item{display:block;width:100%;text-align:left;background:var(--superficie);border:1px solid var(--linea);
@@ -430,6 +478,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <span class="etiq-fila">Ordenar</span>
     <button class="chip on" data-ord="fecha">Más recientes</button>
     <button class="chip" data-ord="demanda">Más pedidas</button>
+  </div>
+  <div class="campo-buscar" style="margin-bottom:10px">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input id="nq" type="text" placeholder="Filtrar por pieza, clave o cliente" autocomplete="off">
   </div>
   <div class="resumen" id="resumen-n"></div>
   <div id="lista-negadas"><div class="cargando">Cargando…</div></div>
@@ -726,6 +778,7 @@ $$("[data-dias]").forEach(b=>b.onclick=()=>{
   $$("[data-dias]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   diasNeg=+b.dataset.dias; pintarNegadas();
 });
+{ let tn; const c=$("#nq"); if(c) c.addEventListener("input",()=>{clearTimeout(tn);tn=setTimeout(pintarNegadas,140)}); }
 $$("[data-ord]").forEach(b=>b.onclick=()=>{
   $$("[data-ord]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   ordNeg=b.dataset.ord; pintarNegadas();
@@ -1305,442 +1358,6 @@ async function avisar(reg){
   }catch(e){ aviso("Se abrió WhatsApp, pero no se pudo marcar como avisado."); }
 }
 
-function filaEspera(r){
-  const llego=yaLlego(r);
-  const it=r.clave?porClave.get(r.clave):null;
-  return `<div class="ficha ${llego?'llego':''}">
-    <div class="ficha-top">
-      <span class="clave">${esc(r.nombre||"Cliente")}</span>
-      <span class="exist">${esc(r.tel)}</span>
-    </div>
-    <div class="desc">${esc(r.desc||"")}</div>
-    <div class="renglon-precio">
-      <span class="${llego?'estado-llego':'estado-espera'}">${llego?`Ya llegó — ${it.exist} pz`:"Aún no llega"}</span>
-      <button class="btn-mini ${llego?'destacado':''}" data-avisar="${esc(r.id)}">Avisar por WhatsApp</button>
-    </div>
-    <div class="mini-dato">pidió ${r.cant||1} pz el ${esc(fechaCorta(r.fecha))} ${esc(horaCorta(r.fecha))}</div>
-  </div>`;
-}
-
-/* ============ APARTADOS Y PEDIDOS ============
-   APARTADO: la pieza existe y queda reservada — deja de ser vendible.
-   PEDIDO:   la pieza no hay, se encarga al proveedor con anticipo.
-   El plazo del apartado es de 30 días a partir de la fecha.               */
-const DIAS_APARTADO = 30;
-let APARTADOS=null;
-
-const hoyISO = () => new Date().toISOString();
-/* Las marcas de tiempo se guardan en UTC. Veracruz está a UTC-6, así que un
-   registro hecho después de las 6 pm caía en el día siguiente al mostrarlo.
-   Estas dos funciones convierten a la fecha local antes de escribirla.      */
-function fechaISO(s){                    // 2026-08-28 — para Excel y comparar
-  if(!s) return "";
-  const d=new Date(s); if(isNaN(d)) return String(s).slice(0,10);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-function fechaCorta(s){                  // 28/08/2026 — para leer en pantalla
-  if(!s) return "";
-  const d=new Date(s); if(isNaN(d)) return String(s).slice(0,10);
-  return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
-}
-const horaCorta = s => { const d=new Date(s); return isNaN(d)?"":
-  `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
-/* Folio corto para la nota de papel: A-260828-01 (apartado) / P-... (pedido) */
-function nuevoFolio(tipo){
-  const f=fechaISO(hoyISO()), y=f.slice(2,4), m=f.slice(5,7), dd=f.slice(8,10);
-  const base=`${tipo==="pedido"?"P":"A"}-${y}${m}${dd}`;
-  const n=(APARTADOS||[]).filter(a=>(a.folio||"").startsWith(base)).length+1;
-  return `${base}-${String(n).padStart(2,"0")}`;
-}
-const abonado = a => (a.abonos||[]).reduce((s,x)=>s+(x.monto||0), 0);
-const saldoDe = a => Math.max(0,(a.total||0)-abonado(a));
-/* Un abono sin tipo es de los viejos: eran todos anticipos fuera de caja.  */
-const esCaja = x => x.tipo==="caja";
-const cobradoCaja = a => (a.abonos||[]).filter(esCaja).reduce((s,x)=>s+(x.monto||0),0);
-const faltaTotal = a => !(a.total>0);
-/* Dinero que Aldo trae en mano: solo mientras el apartado NO esté pagado.
-   Al quedar liquidado se captura completo en SAIT y sale de este conteo.   */
-function fueraDeCaja(a){
-  if(faltaTotal(a)) return abonado(a);        // total sin capturar: sigue afuera
-  return saldoDe(a)>0 ? abonado(a) : 0;
-}
-const estaPagado = a => !faltaTotal(a) && saldoDe(a)<=0;
-const masDias = n => new Date(Date.now()+n*864e5).toISOString();
-const diasPara = f => Math.ceil((new Date(f)-Date.now())/864e5);
-
-async function cargarApartados(){
-  if(APARTADOS) return APARTADOS;
-  try{
-    const s=await getDocs(collection(db,COL_APARTADOS));
-    APARTADOS=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.vence||"").localeCompare(b.vence||""));
-  }catch(e){ APARTADOS=[]; }
-  return APARTADOS;
-}
-const activos = () => (APARTADOS||[]).filter(a=>a.estado==="activo");
-/* Piezas comprometidas de una clave: solo apartados, el pedido aún no existe */
-function reservadas(clave){
-  return activos().filter(a=>a.tipo==="apartado" && a.clave===clave)
-                  .reduce((s,a)=>s+(a.cant||1),0);
-}
-const disponible = i => Math.max(0,(i.exist||0)-reservadas(i.clave));
-
-/* Selector de pieza: permite arrancar un apartado desde la propia pestaña,
-   sin tener que ir a buscar la refacción primero.                          */
-function elegirPieza(){
-  abrirModal(`<h2>¿Qué pieza?</h2>
-    <p class="sub-t">Busca por clave o descripción.</p>
-    <input type="text" id="sel-q" placeholder="Ej. balatas ybr125" autocomplete="off" style="margin-top:10px">
-    <div id="sel-res" class="lista" style="margin-top:12px"></div>
-    <button class="btn sec" id="sel-libre" style="margin-top:10px">No está en el catálogo — escribirlo a mano</button>
-    <div class="acciones"><button class="btn sec" data-cerrar>Cancelar</button></div>`);
-  $("#sel-libre").onclick=()=>{
-    const t=$("#sel-q").value.trim();
-    if(!t){ aviso("Escribe primero qué pieza pide el cliente."); $("#sel-q").focus(); return; }
-    cerrarModal(); nuevoApartado(null,t);
-  };
-  const pintarSel=()=>{
-    const ts=normTexto($("#sel-q").value).split(" ").filter(Boolean);
-    if(!ts.length){ $("#sel-res").innerHTML=""; return; }
-    const r=ITEMS.filter(i=>ts.every(t=>coincide(i,t)))
-                 .sort((a,b)=>disponible(b)-disponible(a)).slice(0,8);
-    $("#sel-res").innerHTML = r.length? r.map(i=>`
-      <button class="sel-item" data-pick="${esc(i.clave)}">
-        <span class="clave">${esc(i.clave)}</span>
-        <span class="desc">${esc(i.desc||"")}</span>
-        <span class="mini-dato">${disponible(i)} disponible(s)${precioDe(i).hay?" · "+pesos(precioDe(i).final):""}</span>
-      </button>`).join("")
-      : `<div class="mini-dato" style="padding:10px 2px">Sin resultados.</div>`;
-    $$("[data-pick]").forEach(b=>b.onclick=()=>{ const c=b.dataset.pick; cerrarModal(); nuevoApartado(c); });
-  };
-  let t2; $("#sel-q").addEventListener("input",()=>{clearTimeout(t2);t2=setTimeout(pintarSel,110)});
-  $("#sel-q").focus();
-}
-
-async function nuevoApartado(clave, libre){
-  if(!esAdmin && !(await pedirClave())) return;
-  const i = clave? porClave.get(clave) : null;
-  if(clave && !i) return;
-  const hay = i? disponible(i)>0 : false;          // sin clave siempre es pedido
-  const punit = i ? (precioDe(i).final||0) : 0;
-  const desc = i? (i.desc||"") : (libre||"");
-  abrirModal(`
-    <h2>${hay?"Apartar pieza":"Pedido sobre encargo"}</h2>
-    <p class="sub-t">${esc(desc)}${clave?"":" · no está en el catálogo"}</p>
-    <div class="tipos">
-      <button class="tipo-b ${hay?'on':''}" data-tipo="apartado" ${hay?"":"disabled"}>Apartado<small>${i?disponible(i)+" disponibles":"sin existencia"}</small></button>
-      <button class="tipo-b ${hay?'':'on'}" data-tipo="pedido">Pedido<small>se encarga</small></button>
-    </div>
-    <label class="lbl">Cantidad</label>
-    <div class="cants">${[1,2,3,4,5,10].map((n,k)=>`<button class="cant ${k===0?'on':''}" data-c="${n}">${n}</button>`).join("")}</div>
-    <div class="grid2">
-      <div><label class="lbl">Total a pagar</label><input type="number" id="a-total" value="${punit}" step="0.01" inputmode="decimal"></div>
-      <div><label class="lbl">Anticipo recibido</label><input type="number" id="a-abono" value="" step="0.01" inputmode="decimal" placeholder="0.00"></div>
-    </div>
-    <div class="saldo" id="a-saldo"></div>
-    <label class="lbl">Cliente</label>
-    <input type="text" id="a-nom" placeholder="Nombre">
-    <input type="tel" id="a-tel" placeholder="WhatsApp — 10 dígitos" inputmode="numeric" style="margin-top:8px">
-    <label class="lbl">¿Quién lo tomó?</label>
-    <input type="text" id="a-quien" value="${esc(ultimoQuien)}" placeholder="Nombre o iniciales">
-    <label class="lbl">Notas</label>
-    <input type="text" id="a-notas" placeholder="Ej. pasa el sábado, lo quiere en negro">
-    <div class="acciones">
-      <button class="btn sec" data-cerrar>Cancelar</button>
-      <button class="btn" id="g-apa">Registrar</button>
-    </div>`);
-  let tipo=hay?"apartado":"pedido", cant=1;
-  const recalc=()=>{
-    const tot=+$("#a-total").value||0, ab=+$("#a-abono").value||0;
-    $("#a-saldo").innerHTML=`Saldo pendiente: <b>${pesos(Math.max(0,tot-ab))}</b>`;
-  };
-  const setTotal=()=>{ $("#a-total").value=(punit*cant).toFixed(2); recalc(); };
-  $$(".tipo-b").forEach(b=>b.onclick=()=>{ if(b.disabled) return; tipo=b.dataset.tipo;
-    $$(".tipo-b").forEach(x=>x.classList.remove("on")); b.classList.add("on"); });
-  $$(".cant").forEach(b=>b.onclick=()=>{ cant=+b.dataset.c;
-    $$(".cant").forEach(x=>x.classList.remove("on")); b.classList.add("on"); setTotal(); });
-  $("#a-total").oninput=recalc; $("#a-abono").oninput=recalc; recalc();
-
-  $("#g-apa").onclick=async ()=>{
-    if(tipo==="apartado" && i && cant>disponible(i)){
-      aviso(`Solo hay ${disponible(i)} disponible(s). Ajusta la cantidad.`); return;
-    }
-    const b=$("#g-apa"); b.disabled=true; b.textContent="Guardando…";
-    ultimoQuien=$("#a-quien").value.trim();
-    const id=`${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-    const ant=+$("#a-abono").value||0;
-    const reg={ id, folio:nuevoFolio(tipo), tipo, clave:clave||"", desc, cant,
-      total:+$("#a-total").value||0,
-      abonos: ant>0? [{fecha:hoyISO(), monto:ant, quien:ultimoQuien}] : [],
-      cliente:$("#a-nom").value.trim(), tel:soloDigitos($("#a-tel").value),
-      quien:ultimoQuien, notas:$("#a-notas").value.trim(),
-      estado:"activo", llego:false, fecha:hoyISO(),
-      vence: tipo==="apartado"? masDias(DIAS_APARTADO) : "" };
-    try{
-      await setDoc(doc(db,COL_APARTADOS,id),reg);
-      (APARTADOS=APARTADOS||[]).push(reg);
-      cerrarModal(); pintar();
-      verApartado(reg.id);
-      aviso(`Folio ${reg.folio} registrado.`,"bien");
-    }catch(e){ b.disabled=false; b.textContent="Registrar"; alert("No se pudo guardar: "+e.message); }
-  };
-}
-
-/* ============ FICHA DEL APARTADO ============
-   Es el equivalente digital de la nota de papel: folio, pieza, lo que ha
-   abonado y lo que debe. Aquí se anotan los abonos parciales.            */
-function verApartado(id){
-  const a=(APARTADOS||[]).find(x=>x.id===id); if(!a) return;
-  const saldo=saldoDe(a), llego=yaLlego(a);
-  const d=a.vence?diasPara(a.vence):null;
-  abrirModal(`
-    <div class="folio">${esc(a.folio||"")}</div>
-    <h2>${esc(a.cliente||"Sin nombre")}</h2>
-    <p class="sub-t">${a.cant} pz · ${esc(a.desc||"")}</p>
-    ${a.tel?`<p class="sub-t">${esc(a.tel)}</p>`:""}
-
-    <div class="cuenta">
-      <div><span>Total</span><b>${pesos(a.total)}</b></div>
-      <div><span>Abonado</span><b>${pesos(abonado(a))}</b></div>
-      <div class="${saldo>0?'debe':'pagado'}"><span>Saldo</span><b>${pesos(saldo)}</b></div>
-    </div>
-
-    ${faltaTotal(a)?`<div class="aviso malo">Este registro no tiene total capturado, así que no se puede calcular el saldo ni saber si ya está pagado.</div>`:""}
-    ${a.estado==="activo"?`
-      <div class="grid2" style="margin-top:10px">
-        <input type="number" id="ed-total" value="${a.total||""}" step="0.01" inputmode="decimal" placeholder="Total a pagar">
-        <button class="btn sec" id="ed-ok">Corregir total</button>
-      </div>`:""}
-    <label class="lbl">Abonos</label>
-    ${(a.abonos||[]).length? `<div class="abonos">${a.abonos.map((x,k)=>`
-        <div class="abono"><span>${esCaja(x)?"Liquidación":(k===0?"Anticipo":"Abono "+(k+1))}${esCaja(x)?' <em class="en-caja">en caja SAIT</em>':""}</span>
-          <span class="f">${esc(fechaCorta(x.fecha))}${x.quien?" · "+esc(x.quien):""}</span>
-          <b>${pesos(x.monto)}</b></div>`).join("")}</div>`
-      : `<div class="mini-dato">Sin abonos registrados.</div>`}
-    ${a.estado==="activo"&&saldo>0?`
-      <div class="grid2" style="margin-top:10px">
-        <input type="number" id="ab-monto" placeholder="Monto" step="0.01" inputmode="decimal">
-        <button class="btn" id="ab-add">Registrar abono</button>
-      </div>`:""}
-
-    <div class="mini-dato" style="margin-top:14px">
-      ${a.tipo==="apartado"
-        ? (d<0?`Venció hace ${-d} día(s)`:`Vence el ${fechaCorta(a.vence)} — ${d} día(s)`)
-        : (llego?"Ya llegó al almacén":"Esperando al proveedor")}
-      ${a.quien?` · tomó ${esc(a.quien)}`:""}
-    </div>
-    ${a.notas?`<div class="notas">${esc(a.notas)}</div>`:""}
-
-    <div class="acciones" style="flex-wrap:wrap">
-      ${a.tel?`<button class="btn sec" id="ap-wa">Mandar nota</button>`:""}
-      <button class="btn sec" id="ap-print">Imprimir</button>
-    </div>
-    ${a.estado==="activo"?`
-      <div class="acciones">
-        ${a.tipo==="pedido"&&!a.clave&&!a.llego?`<button class="btn sec" id="ap-llego">Ya llegó</button>`:""}
-        <button class="btn sec" id="ap-canc" style="color:var(--rojo);border-color:var(--rojo)">Cancelar</button>
-        <button class="btn" id="ap-liq">${saldo>0?"Liquidar y entregar":"Entregar"}</button>
-      </div>`:`<div class="aviso">Este registro está ${esc(a.estado)}.</div>`}
-    <div class="acciones"><button class="btn sec" data-cerrar>Cerrar</button></div>`);
-
-  if($("#ab-add")) $("#ab-add").onclick=()=>agregarAbono(a);
-  if($("#ed-ok")) $("#ed-ok").onclick=async ()=>{
-    const t=+$("#ed-total").value||0;
-    if(t<=0){ aviso("Escribe el total a pagar."); return; }
-    if(t<abonado(a)){ aviso(`Ya abonó ${pesos(abonado(a))}. El total no puede ser menor.`); return; }
-    try{ await setDoc(doc(db,COL_APARTADOS,a.id),{total:t},{merge:true});
-      a.total=t; verApartado(a.id); pintar();
-      aviso(estaPagado(a)?"Total corregido. Queda pagado, así que sale del dinero fuera de caja.":"Total corregido.","bien");
-    }catch(e){ aviso("No se pudo guardar."); } };
-  if($("#ap-wa")) $("#ap-wa").onclick=()=>mandarNota(a);
-  $("#ap-print").onclick=()=>imprimirNota(a);
-  if($("#ap-llego")) $("#ap-llego").onclick=async ()=>{
-    try{ await setDoc(doc(db,COL_APARTADOS,a.id),{llego:true},{merge:true});
-      a.llego=true; verApartado(id); aviso("Marcado como llegado. Avísale al cliente.","bien");
-    }catch(e){ aviso("No se pudo actualizar."); } };
-  if($("#ap-liq")) $("#ap-liq").onclick=()=>liquidar(a);
-  if($("#ap-canc")) $("#ap-canc").onclick=()=>{ cerrarModal(); cerrarApartado(a.id,"cancelado"); };
-}
-
-async function agregarAbono(a){
-  const monto=+$("#ab-monto").value||0;
-  if(monto<=0){ aviso("Escribe el monto del abono."); return; }
-  if(monto>saldoDe(a)+0.01){ aviso(`El saldo es ${pesos(saldoDe(a))}. No puede abonar de más.`); return; }
-  const b=$("#ab-add"); b.disabled=true; b.textContent="Guardando…";
-  const abonos=[...(a.abonos||[]),{fecha:hoyISO(),monto,quien:ultimoQuien}];
-  try{
-    await setDoc(doc(db,COL_APARTADOS,a.id),{abonos},{merge:true});
-    a.abonos=abonos; verApartado(a.id);
-    aviso(`Abono de ${pesos(monto)} registrado. Saldo: ${pesos(saldoDe(a))}`,"bien");
-  }catch(e){ b.disabled=false; b.textContent="Registrar abono"; aviso("No se pudo guardar el abono."); }
-}
-
-function textoNota(a){
-  const l=[`MOTO PRO — Nota ${a.folio}`,``,
-    `${a.cant} pz · ${a.desc}`,
-    `Total: ${pesos(a.total)}`];
-  (a.abonos||[]).forEach((x,k)=>l.push(`${k===0?"Anticipo":"Abono "+(k+1)} ${fechaCorta(x.fecha)}: ${pesos(x.monto)}`));
-  l.push(`Saldo pendiente: ${pesos(saldoDe(a))}`);
-  if(a.tipo==="apartado"&&a.vence) l.push(``,`Lo guardamos hasta el ${fechaCorta(a.vence)}.`);
-  else l.push(``,`Le avisamos en cuanto llegue.`);
-  return l.join("\n");
-}
-function mandarNota(a){
-  window.open(`https://wa.me/${telWA(a.tel)}?text=${encodeURIComponent(textoNota(a))}`,"_blank");
-}
-function imprimirNota(a){
-  const w=window.open("","_blank","width=420,height=640");
-  if(!w){ aviso("El navegador bloqueó la ventana de impresión."); return; }
-  w.document.write(`<html><head><title>Nota ${esc(a.folio)}</title><style>
-    body{font-family:system-ui,sans-serif;padding:18px;font-size:13px;color:#000}
-    h1{font-size:17px;margin:0;letter-spacing:.08em}
-    .f{font-family:monospace;font-size:20px;font-weight:700;margin:6px 0 14px}
-    table{width:100%;border-collapse:collapse;margin-top:10px}
-    td{padding:4px 0;border-bottom:1px dotted #bbb}
-    td.r{text-align:right;font-variant-numeric:tabular-nums}
-    .tot{font-weight:700;font-size:15px;border-top:2px solid #000}
-    .pie{margin-top:22px;font-size:11px;color:#555}
-    </style></head><body>
-    <h1>MOTO PRO</h1><div class="f">${esc(a.folio||"")}</div>
-    <div><b>${esc(a.cliente||"")}</b> ${a.tel?"· "+esc(a.tel):""}</div>
-    <div style="margin-top:8px">${a.cant} pz · ${esc(a.desc||"")}</div>
-    <table>
-      <tr><td>Total</td><td class="r">${pesos(a.total)}</td></tr>
-      ${(a.abonos||[]).map((x,k)=>`<tr><td>${k===0?"Anticipo":"Abono "+(k+1)} ${esc(fechaCorta(x.fecha))}</td><td class="r">${pesos(x.monto)}</td></tr>`).join("")}
-      <tr class="tot"><td>Saldo</td><td class="r">${pesos(saldoDe(a))}</td></tr>
-    </table>
-    <div class="pie">${a.tipo==="apartado"&&a.vence
-      ? "Se guarda hasta el "+esc(fechaCorta(a.vence))+"."
-      : "Le avisamos en cuanto llegue."}<br>Conserve esta nota para recoger su pieza.</div>
-    </body></html>`);
-  w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
-}
-
-async function liquidar(a){
-  const saldo=saldoDe(a), ant=fueraDeCaja(a);
-  abrirModal(`
-    <div class="folio">${esc(a.folio||"")}</div>
-    <h2>Liquidar y entregar</h2>
-    <p class="sub-t">${a.cant} pz · ${esc(a.desc||"")}</p>
-    <div class="liq">
-      <div><span>Registrar en SAIT como venta</span><b>${pesos(a.total)}</b></div>
-      <div class="ant"><span>Ya tenía anticipado (fuera de caja)</span><b>${pesos(ant)}</b></div>
-      <div class="cob"><span>Cobrar ahora al cliente</span><b>${pesos(saldo)}</b></div>
-    </div>
-    <p class="nota-precio">La venta se captura completa en SAIT por ${pesos(a.total)}. Del cliente solo recibes ${pesos(saldo)}; los ${pesos(ant)} restantes ya los tenías.</p>
-    <label class="lbl">Monto recibido ahora</label>
-    <input type="number" id="liq-monto" value="${saldo.toFixed(2)}" step="0.01" inputmode="decimal">
-    <div class="acciones">
-      <button class="btn sec" data-cerrar>Cancelar</button>
-      <button class="btn" id="liq-ok">Liquidar y entregar</button>
-    </div>`);
-  $("#liq-ok").onclick=async ()=>{
-    const monto=+$("#liq-monto").value||0;
-    if(monto>saldo+0.01){ aviso(`El saldo es ${pesos(saldo)}. No puede recibir de más.`); return; }
-    const b=$("#liq-ok"); b.disabled=true; b.textContent="Guardando…";
-    const abonos=[...(a.abonos||[])];
-    if(monto>0) abonos.push({fecha:hoyISO(),monto,quien:ultimoQuien,tipo:"caja"});
-    try{
-      await setDoc(doc(db,COL_APARTADOS,a.id),
-        {abonos, estado:"entregado", fechaCierre:hoyISO(), enCaja:true},{merge:true});
-      Object.assign(a,{abonos,estado:"entregado",fechaCierre:hoyISO(),enCaja:true});
-      cerrarModal(); pintar();
-      aviso(`Entregado. Captura la venta en SAIT por ${pesos(a.total)}.`,"bien");
-    }catch(e){ b.disabled=false; b.textContent="Liquidar y entregar"; aviso("No se pudo guardar."); }
-  };
-}
-
-async function cerrarApartado(id,estado){
-  const a=(APARTADOS||[]).find(x=>x.id===id); if(!a) return;
-  try{
-    await setDoc(doc(db,COL_APARTADOS,id),{estado,fechaCierre:hoyISO()},{merge:true});
-    a.estado=estado; a.fechaCierre=hoyISO();
-    pintar(); aviso(estado==="entregado"?"Marcado como entregado.":"Apartado cancelado. La pieza vuelve a estar disponible.","bien");
-  }catch(e){ aviso("No se pudo actualizar."); }
-}
-
-function avisarApartado(a){
-  const llego = a.tipo==="pedido" && (porClave.get(a.clave)?.exist||0)>0;
-  const saldo = saldoDe(a);
-  const texto = a.tipo==="pedido"
-    ? `Hola${a.cliente?" "+a.cliente:""}, le escribo de Moto Pro. Ya llegó su pedido: ${a.desc}. `+
-      (saldo>0?`Queda un saldo de ${pesos(saldo)}. `:"")+`Puede pasar por él cuando guste.`
-    : `Hola${a.cliente?" "+a.cliente:""}, le escribo de Moto Pro. Le recordamos su apartado: ${a.desc}. `+
-      (saldo>0?`Saldo pendiente ${pesos(saldo)}. `:"")+
-      `Lo tenemos guardado hasta el ${fechaCorta(a.vence)}.`;
-  window.open(`https://wa.me/${telWA(a.tel)}?text=${encodeURIComponent(texto)}`,"_blank");
-}
-
-async function pintarApartados(){
-  try{ await _pintarApartados(); }catch(e){
-    console.error("pintarApartados",e);
-    $("#lista-apartados").innerHTML=`<div class="aviso malo"><b>No se pudo mostrar esta sección.</b><br>${esc(e.message||e)}<br><br>Mándale esta pantalla a quien te da soporte.</div>`;
-  }
-}
-async function _pintarApartados(){
-  await cargarApartados();
-  const act=activos();
-  if(!act.length){
-    $("#resumen-a").textContent="";
-    $("#lista-apartados").innerHTML=`<div class="vacio-msg"><div class="grande">Nada apartado</div>
-      Usa el botón de arriba, o el botón <b>Apartar</b> de cualquier ficha al buscar.</div>`;
-    $("#exp-apartados").classList.add("oculto");
-    return;
-  }
-  const vencidos=act.filter(a=>a.tipo==="apartado" && a.vence && diasPara(a.vence)<0);
-  const porVencer=act.filter(a=>a.tipo==="apartado" && a.vence && diasPara(a.vence)>=0 && diasPara(a.vence)<=3);
-  const pedLlegaron=act.filter(a=>a.tipo==="pedido" && (porClave.get(a.clave)?.exist||0)>0);
-  const sinTotal=act.filter(faltaTotal);
-  const pagados=act.filter(estaPagado);
-  const resto=act.filter(a=>!vencidos.includes(a)&&!porVencer.includes(a)&&!pedLlegaron.includes(a)&&!sinTotal.includes(a)&&!pagados.includes(a));
-  $("#exp-apartados").classList.remove("oculto");
-  const dinero=act.reduce((s,a)=>s+fueraDeCaja(a),0);   // lo que traes en mano
-  const saldos=act.reduce((s,a)=>s+saldoDe(a),0);
-  $("#resumen-a").innerHTML=`<span>${act.length} activos · ${pesos(dinero)} en anticipos fuera de caja · ${pesos(saldos)} por cobrar${
-  pagados.length?` · ${pagados.length} ya pagado(s) en SAIT`:""}</span>`;
-
-  const fila=a=>{
-    const d=a.vence?diasPara(a.vence):null;
-    const llego=a.tipo==="pedido"&&(porClave.get(a.clave)?.exist||0)>0;
-    const saldo=saldoDe(a);
-    return `<div class="ficha ${d!==null&&d<0?'venc':llego?'llego':''}">
-      <div class="ficha-top">
-        <span class="clave">${esc(a.folio||"")}</span>
-        <span class="exist">${esc(a.cliente||"Sin nombre")}</span>
-      </div>
-      <div class="desc"><b>${a.cant} pz</b> · ${esc(a.desc||"")}</div>
-      <div class="dinero">
-        <span>Total ${faltaTotal(a)?"—":pesos(a.total)}</span><span>Abonó ${pesos(abonado(a))}</span>
-        <span class="${faltaTotal(a)?'debe':saldo>0?'debe':'pagado'}">${
-          faltaTotal(a)?"Falta capturar el total":saldo>0?"Debe "+pesos(saldo):"Pagado · en caja SAIT"}</span>
-      </div>
-      <div class="mini-dato">
-        ${a.tipo==="apartado"
-          ? (d<0?`Venció hace ${-d} día(s)`:`Vence en ${d} día(s) — ${fechaCorta(a.vence)}`)
-          : (llego?"Ya llegó al almacén":"Esperando al proveedor")}
-        ${a.quien?` · tomó ${esc(a.quien)}`:""}
-      </div>
-      ${a.notas?`<div class="notas">${esc(a.notas)}</div>`:""}
-      <div class="tags" style="margin-top:9px">
-        <button class="btn-mini destacado" data-ver="${esc(a.id)}">Abrir nota</button>
-        ${a.tel?`<button class="btn-mini ${llego||d<0?'negada':''}" data-wa="${esc(a.id)}">WhatsApp</button>`:""}
-        <button class="btn-mini" data-entregar="${esc(a.id)}">${saldo>0?"Liquidar":"Entregar"}</button>
-      </div>
-    </div>`;
-  };
-  const bloque=(t,l,c)=>l.length?`<h3 class="sec-tit ${c||""}">${t} (${l.length})</h3><div class="lista">${l.map(fila).join("")}</div>`:"";
-  $("#lista-apartados").innerHTML =
-    bloque("Falta capturar el total — el saldo no se puede calcular",sinTotal,"rojo")+
-    bloque("Vencidos — la pieza sigue ocupada",vencidos,"rojo")+
-    bloque("Pagados en SAIT — solo falta que pasen por la pieza",pagados.filter(a=>!vencidos.includes(a)&&!pedLlegaron.includes(a)),"verde")+
-    bloque("Ya llegaron — avisa al cliente",pedLlegaron,"verde")+
-    bloque("Por vencer esta semana",porVencer)+
-    bloque("Activos",resto);
-  $$("[data-ver]").forEach(b=>b.onclick=()=>verApartado(b.dataset.ver));
-  $$("[data-wa]").forEach(b=>b.onclick=()=>avisarApartado(act.find(x=>x.id===b.dataset.wa)));
-  $$("[data-entregar]").forEach(b=>b.onclick=()=>liquidar(act.find(x=>x.id===b.dataset.entregar)));
-  $$("[data-cancelar]").forEach(b=>b.onclick=()=>cerrarApartado(b.dataset.cancelar,"cancelado"));
-}
-
 async function pintarNegadas(){
   try{ await _pintarNegadas(); }catch(e){
     console.error("pintarNegadas",e);
@@ -1751,7 +1368,8 @@ async function _pintarNegadas(){
   const n=await cargarNegadas();
   const corte=new Date(Date.now()-diasNeg*864e5).toISOString();
   const r=n.filter(x=>(x.fecha||"")>=corte);
-  if(!r.length){
+  const esp=esperando(), listos=esp.filter(yaLlego);  // sin corte: espera hasta que se le avisa
+  if(!r.length && !esp.length){
     $("#resumen-n").textContent="";
     $("#lista-negadas").innerHTML=`<div class="vacio-msg"><div class="grande">Sin registros</div>
       Cuando el mostrador marque una pieza que no se pudo vender, aparece aquí.</div>`;
@@ -1768,34 +1386,76 @@ async function _pintarNegadas(){
   const orden=[...g.values()].sort(ordNeg==="demanda"
     ? (a,b)=>b.veces-a.veces || b.piezas-a.piezas || (b.ultima||"").localeCompare(a.ultima||"")
     : (a,b)=>(b.ultima||"").localeCompare(a.ultima||""));
-  const enCat=orden.filter(o=>o.clave), fuera=orden.filter(o=>!o.clave);
-  $("#resumen-n").textContent=`${r.length} registros · ${r.reduce((s,x)=>s+(x.cant||1),0)} piezas perdidas`;
+  let enCat=orden.filter(o=>o.clave), fuera=orden.filter(o=>!o.clave);
+  let espF=esp;
 
-  const fila=o=>{
-    const it=o.clave?porClave.get(o.clave):null;
-    return `<div class="ficha">
-      <div class="ficha-top">
-        <span class="clave">${esc(o.clave||"— sin clave —")}</span>
-        <span class="exist ${o.veces>1?'repetida':''}"><b>${o.piezas}</b> pz · ${o.veces} vez${o.veces===1?"":"es"}</span>
-      </div>
-      <div class="desc">${esc(o.desc||"—")}</div>
-      ${it?`<div class="tags">${etiqueta(it.u1,it.u2,it.u3)}
-        <span class="mini-dato">hoy: ${it.exist||0} pz</span></div>`:""}
-      <div class="mini-dato">última: ${esc(fechaCorta(o.ultima))} ${esc(horaCorta(o.ultima))}</div>
+  // Filtro de texto: con cientos de renglones, buscar es más rápido que recorrer
+  const q=normTexto($("#nq")?.value||"");
+  if(q){
+    const ts=q.split(" ").filter(Boolean);
+    const cal=t=>ts.every(x=>normTexto(t).includes(x));
+    enCat=enCat.filter(o=>cal(o.clave+" "+o.desc));
+    fuera=fuera.filter(o=>cal(o.desc||""));
+    espF=espF.filter(x=>cal((x.nombre||"")+" "+(x.desc||"")+" "+(x.tel||"")));
+  }
+  $("#resumen-n").innerHTML=`<span>${r.length} registros · ${r.reduce((s,x)=>s+(x.cant||1),0)} piezas perdidas${
+    listos.length?` · <b class="ok-txt">${listos.length} ya llegaron</b>`:""}</span>`;
+
+  /* Renglón de cliente en espera: quién, qué, y el botón de avisar */
+  const rEsp=x=>{
+    const llego=yaLlego(x), it=x.clave?porClave.get(x.clave):null;
+    return `<div class="ren ${llego?'ok':''}">
+      <span class="r-pri">${esc(x.nombre||"Cliente")}</span>
+      <span class="r-sec">${esc(x.desc||"")}</span>
+      <span class="r-est ${llego?'ok':''}">${llego?`llegó · ${it.exist} pz`:"no llega"}</span>
+      <span class="r-fec">${esc(fechaCorta(x.fecha))}</span>
+      <button class="r-btn ${llego?'ok':''}" data-avisar="${esc(x.id)}" title="Avisar por WhatsApp">WA</button>
     </div>`;
   };
-  const esp=esperando(), listos=esp.filter(yaLlego);  // sin corte de fecha: un cliente espera hasta que se le avisa
+  /* Renglón de demanda agrupada: qué pidieron y cuántas veces */
+  const rDem=o=>{
+    const it=o.clave?porClave.get(o.clave):null;
+    return `<div class="ren">
+      ${o.clave?`<span class="r-cla">${esc(o.clave)}</span>`:""}
+      <span class="r-sec ${o.clave?"":"ancho"}">${esc(o.desc||"—")}</span>
+      <span class="r-num ${o.veces>1?'alto':''}" title="${o.piezas} piezas en ${o.veces} pedido(s)">${o.piezas}<em>pz</em>${
+        o.veces>1?` · ${o.veces}×`:""}</span>
+      ${it?`<span class="r-ubi">${esc(it.u1?[it.u1,it.u2].filter(Boolean).join(" "):"sin ubicar")}</span>
+            <span class="r-hoy ${(it.exist||0)>0?'ok':''}">${it.exist||0}</span>`:`<span class="r-ubi"></span><span class="r-hoy"></span>`}
+      <span class="r-fec">${esc(fechaCorta(o.ultima))}</span>
+    </div>`;
+  };
+  const sec=(id,tit,arr,fn,abre,nota)=>{
+    if(!arr.length) return "";
+    const ab=secNeg[id]!==false && abre;
+    return `<div class="secc">
+      <button class="secc-cab" data-sec="${id}">
+        <span class="flecha">${ab?"▾":"▸"}</span>
+        <span class="secc-tit">${tit}</span>
+        <span class="secc-num">${arr.length}</span>
+        ${nota||""}
+      </button>
+      <div class="secc-cuerpo ${ab?"":"oculto"}" id="sec-${id}">${arr.map(fn).join("")}</div>
+    </div>`;
+  };
   $("#lista-negadas").innerHTML =
-    (esp.length?`<h3 class="sec-tit">Clientes esperando aviso (${esp.length}${listos.length?` · ${listos.length} ya llegaron`:""})</h3>
-       <div class="lista">${esp.map(filaEspera).join("")}</div>`:"")+
-    (enCat.length?`<h3 class="sec-tit">Sí las manejas, pero se acabaron (${enCat.length})</h3>
-       <div class="lista">${enCat.map(fila).join("")}</div>`:"")+
-    (fuera.length?`<h3 class="sec-tit">No están en catálogo — demanda que no cubres (${fuera.length})</h3>
-       <div class="lista">${fuera.map(fila).join("")}</div>`:"");
-  $$("[data-avisar]").forEach(b=>b.onclick=()=>{
-    const r=(NEGADAS||[]).find(x=>x.id===b.dataset.avisar); if(r) avisar(r);
+    sec("esp","Clientes esperando aviso",espF,rEsp,true,
+        listos.length?`<span class="secc-alerta">${listos.length} ya llegaron</span>`:"")+
+    sec("cat","Se acabaron — sí las manejas",enCat,rDem,true,"")+
+    sec("fue","No están en catálogo",fuera,rDem,false,"");
+
+  $$("[data-sec]").forEach(b=>b.onclick=()=>{
+    const id=b.dataset.sec, c=$("#sec-"+id);
+    const abierto=!c.classList.contains("oculto");
+    c.classList.toggle("oculto"); secNeg[id]=!abierto;
+    b.querySelector(".flecha").textContent = abierto?"▸":"▾";
+  });
+  $$("[data-avisar]").forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    const x=(NEGADAS||[]).find(y=>y.id===b.dataset.avisar); if(x) avisar(x);
   });
 }
+let secNeg={};
 
 /* Accesos rápidos: las familias de pieza más numerosas del catálogo */
 function pintarMotos(){
