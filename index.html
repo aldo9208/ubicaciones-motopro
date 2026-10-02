@@ -1429,10 +1429,129 @@ async function pintarVentas(){
 async function _pintarVentas(){
   if(fuenteV==="mov") return pintarMovimiento();
   await cargarVentas();
-  if(!VENTAS.length){
+  const meses=(VENTAS||[]).filter(d=>d.periodo).sort((a,b)=>b.periodo.localeCompare(a.periodo));
+  if(meses.length) return pintarMensual(meses);
+  return pintarDiario();
+}
+
+/* ============ VENTAS POR MES ============
+   El reporte mensual de SAIT es la mejor fuente: la venta viene medida, no
+   deducida. Cruzado con la existencia de hoy da la métrica que decide una
+   compra: cuántos meses de inventario queda de cada pieza.               */
+const NOMMES={1:"enero",2:"febrero",3:"marzo",4:"abril",5:"mayo",6:"junio",
+  7:"julio",8:"agosto",9:"septiembre",10:"octubre",11:"noviembre",12:"diciembre"};
+const etiqMes = p => { const [a,m]=p.split("-"); return `${NOMMES[+m]} ${a}`; };
+let mesSel="";
+
+function pintarMensual(meses){
+  if(!mesSel || !meses.some(d=>d.periodo===mesSel)) mesSel=meses[0].periodo;
+  const usar = mesSel==="TODO" ? meses : meses.filter(d=>d.periodo===mesSel);
+  const nMeses = usar.length;
+
+  // Acumula por clave sobre los meses elegidos
+  const g=new Map();
+  usar.forEach(d=>(d.lineas||[]).forEach(l=>{
+    if(!g.has(l.clave)) g.set(l.clave,{clave:l.clave,desc:l.desc,cant:0});
+    g.get(l.clave).cant+=l.cant||0;
+  }));
+  const vendidas=[...g.values()].map(o=>{
+    const i=porClave.get(o.clave);
+    const ex=i?disponible(i):0, porMes=o.cant/nMeses;
+    return {...o, i, ex, porMes,
+      mesesRest: porMes>0? ex/porMes : 999,
+      dinero: o.cant*conIva(i?.p1||0)};
+  });
+  const pz=vendidas.reduce((s,o)=>s+o.cant,0);
+  const dinero=vendidas.reduce((s,o)=>s+o.dinero,0);
+
+  // Lo que tiene existencia y no vendió nada en el periodo
+  const sinVenta=ITEMS.filter(i=>(i.exist||0)>0 && !g.has(i.clave))
+    .map(i=>({i, clave:i.clave, desc:i.desc||"", ex:i.exist, parado:i.exist*(i.p1||0)}))
+    .sort((a,b)=>b.parado-a.parado);
+  const parado=sinVenta.reduce((s,o)=>s+o.parado,0);
+
+  const agotadas=vendidas.filter(o=>o.i && o.ex<=0).sort((a,b)=>b.cant-a.cant);
+  const reponer=vendidas.filter(o=>o.i && o.ex>0 && o.mesesRest<1).sort((a,b)=>a.mesesRest-b.mesesRest);
+  const top=[...vendidas].sort((a,b)=>b.cant-a.cant);
+
+  $("#resumen-v").innerHTML=`<span>${mesSel==="TODO"?`${nMeses} meses`:etiqMes(mesSel)} · ${pz} piezas · ${vendidas.length} artículos · ${pesos(dinero)} aprox.</span>`;
+
+  const rV=o=>`<div class="ren ${o.ex<=0?'alerta':''}">
+    <span class="r-cla">${esc(o.clave)}</span>
+    <span class="r-sec">${esc(o.desc)}</span>
+    <span class="r-num alto">${o.cant}<em>pz</em></span>
+    <span class="r-ubi">${o.i?(o.i.u1?[o.i.u1,o.i.u2].filter(Boolean).join(" "):"sin ubicar"):"no está en catálogo"}</span>
+    <span class="r-hoy ${o.ex>0?'ok':''}">${o.i?o.ex:"—"}</span>
+    <span class="r-fec">${!o.i?"":o.mesesRest>900?"—":o.mesesRest<1?Math.round(o.mesesRest*30)+" d":o.mesesRest.toFixed(1)+" m"}</span>
+  </div>`;
+  const rS=o=>`<div class="ren">
+    <span class="r-cla">${esc(o.clave)}</span>
+    <span class="r-sec">${esc(o.desc)}</span>
+    <span class="r-num">${o.ex}<em>pz</em></span>
+    <span class="r-ubi">${esc(o.i.u1?[o.i.u1,o.i.u2].filter(Boolean).join(" "):"sin ubicar")}</span>
+    <span class="r-fec">${pesos(o.parado)}</span>
+  </div>`;
+
+  const sec=(id,tit,arr,fn,abre,nota)=>{
+    if(!arr.length) return "";
+    const ab=secMov[id]!==false && abre;
+    return `<div class="secc">
+      <button class="secc-cab" data-secm="${id}">
+        <span class="flecha">${ab?"▾":"▸"}</span><span class="secc-tit">${tit}</span>
+        <span class="secc-num">${arr.length}</span>${nota||""}
+      </button>
+      <div class="secc-cuerpo ${ab?"":"oculto"}" id="secm-${id}">${arr.slice(0,300).map(fn).join("")}
+        ${arr.length>300?`<div class="mini-dato" style="padding:8px 12px">Mostrando 300 de ${arr.length}.</div>`:""}
+      </div></div>`;
+  };
+
+  $("#lista-ventas").innerHTML=`
+    <div class="cmp">
+      <label>Mes</label>
+      <select id="mes-sel">
+        ${meses.map(d=>`<option value="${esc(d.periodo)}" ${d.periodo===mesSel?"selected":""}>${esc(etiqMes(d.periodo))} · ${d.tot?.cant||0} pz</option>`).join("")}
+        ${meses.length>1?`<option value="TODO" ${mesSel==="TODO"?"selected":""}>Todos los meses juntos</option>`:""}
+      </select>
+    </div>
+    ${sec("ago","Se vendió y ya no hay — venta que estás perdiendo",agotadas,rV,true,"")}
+    ${sec("rep","Alcanza para menos de un mes",reponer,rV,true,"")}
+    ${sec("top","Lo más vendido",top,rV,false,"")}
+    ${sec("sin",`Con existencia y sin vender en ${mesSel==="TODO"?"el periodo":etiqMes(mesSel)}`,sinVenta,rS,false,
+       `<span class="secc-alerta rojo-bg">${pesos(parado)} parados</span>`)}
+    <div style="margin-top:14px"><button class="btn sec" id="exp-compra">Descargar lista de compra</button></div>`;
+
+  $("#mes-sel").onchange=()=>{ mesSel=$("#mes-sel").value; pintarVentas(); };
+  $$("[data-secm]").forEach(b=>b.onclick=()=>{
+    const id=b.dataset.secm, c=$("#secm-"+id);
+    const ab=!c.classList.contains("oculto");
+    c.classList.toggle("oculto"); secMov[id]=!ab;
+    b.querySelector(".flecha").textContent=ab?"▸":"▾";
+  });
+  /* La lista de compra es el producto final de todo esto: qué pedir y cuánto */
+  $("#exp-compra").onclick=()=>{
+    const filas=[...agotadas,...reponer].map(o=>({
+      Clave:o.clave, Descripcion:o.desc,
+      "Vendidas en el periodo":o.cant, "Promedio por mes":+o.porMes.toFixed(1),
+      "Existencia hoy":o.ex,
+      "Meses que alcanza": o.mesesRest>900?"":+o.mesesRest.toFixed(1),
+      "Sugerido (2 meses)": Math.max(1,Math.ceil(o.porMes*2-o.ex)),
+      Ubicacion:o.i?.u1?[o.i.u1,o.i.u2,o.i.u3].filter(Boolean).join(" · "):"",
+      Proveedor:o.i?.prov||"", Categoria:o.i?.cat||""
+    }));
+    if(!filas.length){ aviso("No hay nada por reponer en este periodo."); return; }
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(filas),"Compra");
+    XLSX.writeFile(wb,`lista_compra_${mesSel}_${fechaISO(hoyISO())}.xlsx`);
+  };
+}
+
+/* Reporte diario, el formato anterior. Se conserva por si se sube uno. */
+async function pintarDiario(){
+  const diarios=(VENTAS||[]).filter(d=>!d.periodo);
+  if(!diarios.length){
     $("#resumen-v").textContent="";
     $("#lista-ventas").innerHTML=`<div class="vacio-msg"><div class="grande">Sin ventas cargadas</div>
-      Sube el reporte diario de SAIT en Sincronizar. Con varios días se calcula la rotación.</div>`;
+      Sube el reporte de ventas por artículo en Sincronizar. El mensual es el que más sirve.</div>`;
     return;
   }
   const {g,diasConDatos,tot}=acumVentas(diasVta);
@@ -1441,13 +1560,11 @@ async function _pintarVentas(){
 
   const lista=[...g.values()];
   const masVend=[...lista].sort((a,b)=>b.cant-a.cant).slice(0,15);
-  // Por reponer: se vende y quedan pocos días de inventario
   const reponer=lista.map(o=>{
     const i=porClave.get(o.clave); if(!i) return null;
     const disp=disponible(i);
     return {...o, disp, diasRest: o.porDia>0? disp/o.porDia : 999, i};
   }).filter(o=>o&&o.diasRest<21).sort((a,b)=>a.diasRest-b.diasRest);
-  // Sin movimiento: hay existencia pero no se vendió nada en el período
   const quietos=ITEMS.filter(i=>(i.exist||0)>0 && !g.has(i.clave))
     .sort((a,b)=>(b.exist||0)*(b.p1||0)-(a.exist||0)*(a.p1||0)).slice(0,20);
 
@@ -1489,8 +1606,8 @@ async function _pintarVentas(){
 const DIAS_APARTADO = 30;
 let APARTADOS=null;
 
-function masDias(n){ return new Date(Date.now()+n*864e5).toISOString(); }
-function diasPara(f){ return Math.ceil((new Date(f)-Date.now())/864e5); }
+const masDias = n => new Date(Date.now()+n*864e5).toISOString();
+const diasPara = f => Math.ceil((new Date(f)-Date.now())/864e5);
 
 /* Folio corto para la nota de papel: A-260928-01 (apartado) / P-... (pedido) */
 function nuevoFolio(tipo){
@@ -1499,19 +1616,19 @@ function nuevoFolio(tipo){
   const n=(APARTADOS||[]).filter(a=>(a.folio||"").startsWith(base)).length+1;
   return `${base}-${String(n).padStart(2,"0")}`;
 }
-function abonado(a){ return (a.abonos||[]).reduce((s,x)=>s+(x.monto||0),0); }
-function saldoDe(a){ return Math.max(0,(a.total||0)-abonado(a)); }
+const abonado = a => (a.abonos||[]).reduce((s,x)=>s+(x.monto||0), 0);
+const saldoDe = a => Math.max(0,(a.total||0)-abonado(a));
 /* Un abono sin tipo es de los viejos: eran todos anticipos fuera de caja.  */
-function esCaja(x){ return x.tipo==="caja"; }
-function cobradoCaja(a){ return (a.abonos||[]).filter(esCaja).reduce((s,x)=>s+(x.monto||0),0); }
-function faltaTotal(a){ return !(a.total>0); }
+const esCaja = x => x.tipo==="caja";
+const cobradoCaja = a => (a.abonos||[]).filter(esCaja).reduce((s,x)=>s+(x.monto||0),0);
+const faltaTotal = a => !(a.total>0);
 /* Dinero que se trae en mano: solo mientras el apartado NO esté pagado.
    Al quedar liquidado se captura completo en SAIT y sale de este conteo.   */
 function fueraDeCaja(a){
   if(faltaTotal(a)) return abonado(a);        // total sin capturar: sigue afuera
   return saldoDe(a)>0 ? abonado(a) : 0;
 }
-function estaPagado(a){ return !faltaTotal(a) && saldoDe(a)<=0; }
+const estaPagado = a => !faltaTotal(a) && saldoDe(a)<=0;
 
 async function cargarApartados(){
   if(APARTADOS) return APARTADOS;
@@ -1521,13 +1638,13 @@ async function cargarApartados(){
   }catch(e){ APARTADOS=[]; }
   return APARTADOS;
 }
-function activos(){ return (APARTADOS||[]).filter(a=>a.estado==="activo"); }
+const activos = () => (APARTADOS||[]).filter(a=>a.estado==="activo");
 /* Piezas comprometidas de una clave: solo apartados, el pedido aún no existe */
 function reservadas(clave){
   return activos().filter(a=>a.tipo==="apartado" && a.clave===clave)
                   .reduce((s,a)=>s+(a.cant||1),0);
 }
-function disponible(i){ return Math.max(0,(i.exist||0)-reservadas(i.clave)); }
+const disponible = i => Math.max(0,(i.exist||0)-reservadas(i.clave));
 
 /* Selector de pieza: permite arrancar un apartado desde la propia pestaña,
    sin tener que ir a buscar la refacción primero.                          */
@@ -2729,6 +2846,44 @@ $("#archivo").onchange = async e=>{
         Aplican por categoría al precio de mostrador.</div>`;
       $("#btn-import").disabled=false; return;
     }
+    /* ¿Es el reporte mensual por artículo? Trae CLAVE y columnas de mes.
+       Es el formato bueno: un archivo al mes en vez de treinta diarios, y
+       la venta viene medida en vez de deducida de las existencias.      */
+    const MESES=["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","OCT","NOV","DIC"];
+    let hMes=-1;
+    for(let r=0;r<Math.min(20,bruto.length);r++){
+      const f2=(bruto[r]||[]).map(c=>normTexto(c));
+      if(f2.includes("CLAVE") && MESES.filter(m=>f2.includes(m)).length>=6){ hMes=r; break; }
+    }
+    if(hMes>=0){
+      const cb=(bruto[hMes]||[]).map(c=>normTexto(c));
+      const iC2=cb.indexOf("CLAVE"), iN=cb.indexOf("NOMBRE")>=0?cb.indexOf("NOMBRE"):cb.indexOf("DESCRIPCION");
+      const cols=MESES.map(m=>({mes:m, i:cb.indexOf(m)})).filter(x=>x.i>=0);
+      const porMes=new Map(cols.map(c=>[c.mes,[]]));
+      for(let r=hMes+1;r<bruto.length;r++){
+        const f2=bruto[r]||[]; const cl=String(f2[iC2]??"").trim();
+        if(!cl || cl.toUpperCase()==="NAN") continue;
+        const desc=iN>=0?String(f2[iN]??"").trim():"";
+        cols.forEach(c=>{
+          const n=Number(f2[c.i])||0;
+          if(n>0) porMes.get(c.mes).push({clave:cl,desc,cant:n});
+        });
+      }
+      const conDatos=[...porMes.entries()].filter(([,l])=>l.length);
+      if(!conDatos.length) throw new Error("El archivo no tiene ventas en ningún mes.");
+      const anio=new Date().getFullYear();
+      filasImport={mensual:conDatos};
+      const resumen=conDatos.map(([m,l])=>`${m}: ${l.reduce((s,x)=>s+x.cant,0)} pz en ${l.length} artículos`).join("<br>");
+      const fuera=[...new Set(conDatos.flatMap(([,l])=>l.map(x=>x.clave)))].filter(c=>!porClave.has(c)).length;
+      $("#prev-import").innerHTML=`<div class="aviso bien">
+        <b>Ventas por artículo, por mes.</b><br>${resumen}
+        ${fuera?`<br>${fuera} clave(s) no están en el catálogo — sincroniza existencias después.`:""}
+        </div>
+        <label class="lbl">¿De qué año son?</label>
+        <input type="number" id="anio-vta" value="${anio}" min="2020" max="2100" step="1">
+        <p class="nota-precio">El archivo trae los meses pero no el año. Si vuelves a subir el mismo mes, se reemplaza.</p>`;
+      $("#btn-import").disabled=false; return;
+    }
     // ¿Es el reporte diario de ventas? Trae CANTIDAD y COSTO junto a CLAVE.
     let hVt=-1;
     for(let r=0;r<Math.min(20,bruto.length);r++){
@@ -2834,6 +2989,23 @@ $("#btn-import").onclick = async ()=>{
   if(!filasImport) return;
   if(!esAdmin && !(await pedirClave())) return;
   const b=$("#btn-import"); b.disabled=true;
+  if(filasImport.mensual){
+    const anio=parseInt($("#anio-vta").value,10);
+    if(!anio || anio<2020){ aviso("Escribe el año del reporte."); b.disabled=false; return; }
+    const MESN={ENE:1,FEB:2,MAR:3,ABR:4,MAY:5,JUN:6,JUL:7,AGO:8,SEP:9,OCT:10,NOV:11,DIC:12};
+    let n=0;
+    try{
+      for(const [mes,lineas] of filasImport.mensual){
+        const id=`${anio}-${String(MESN[mes]).padStart(2,"0")}`;
+        await setDoc(doc(db,COL_VENTAS,id),
+          {periodo:id, mes, anio, lineas, tot:{cant:lineas.reduce((s,x)=>s+x.cant,0)}, act:hoyISO()});
+        n++;
+      }
+      VENTAS=null; await cargarVentas();
+      $("#prev-import").innerHTML=`<div class="aviso bien"><b>${n} mes(es) guardados.</b> Revisa la pestaña Ventas.</div>`;
+    }catch(e){ $("#prev-import").innerHTML=`<div class="aviso malo">${esc(e.message)}</div>`; }
+    b.disabled=false; return;
+  }
   if(filasImport.ventas){
     const f=$("#fecha-vta").value;
     if(!f){ aviso("Elige la fecha de las ventas."); b.disabled=false; return; }
