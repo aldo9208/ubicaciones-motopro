@@ -156,6 +156,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .diag.ok b{color:var(--verde)}
 .diag.mal{background:#FDECEA}
 .diag.mal b{color:var(--rojo)}
+.diag-meses{margin:10px 0 4px}
+.diag-meses>b{display:block;font-family:Oswald;font-size:11px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--tinta-2);margin-bottom:5px}
 
 /* ---------- Modo mostrador ---------- */
 .mostrador{text-align:center}
@@ -523,6 +526,23 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <button class="btn" id="btn-import" disabled>Procesar archivo</button>
   </div>
   <div class="tarjeta">
+    <h3>Cifras del mes</h3>
+    <p>Los totales del <b>Resumen de notas</b> de SAIT. El reporte por artículo trae el importe antes de descuento y un costo que no cuadra, así que estas cifras son las que mandan en el total del mes.</p>
+    <label class="lbl">Mes</label>
+    <select id="cf-mes"></select>
+    <div class="grid2">
+      <div><label class="lbl">Subtotal (sin IVA)</label><input type="number" id="cf-sub" step="0.01" inputmode="decimal" placeholder="130867.07"></div>
+      <div><label class="lbl">Descuento</label><input type="number" id="cf-desc" step="0.01" inputmode="decimal" placeholder="7832.87"></div>
+    </div>
+    <div class="grid2">
+      <div><label class="lbl">Costo</label><input type="number" id="cf-cos" step="0.01" inputmode="decimal" placeholder="98584.61"></div>
+      <div><label class="lbl">Notas (documentos)</label><input type="number" id="cf-doc" step="1" inputmode="numeric" placeholder="489"></div>
+    </div>
+    <div id="cf-prev"></div>
+    <div style="height:10px"></div>
+    <button class="btn sec" id="btn-cifras">Guardar cifras del mes</button>
+  </div>
+  <div class="tarjeta">
     <h3>Sinónimos de búsqueda</h3>
     <p>Los nombres con que los clientes piden cada pieza. Un término por renglón, separados por comas. Si la descripción usa cualquiera de ellos, la pieza aparece buscando con los demás.</p>
     <textarea id="sin-txt" rows="10" style="font-family:'JetBrains Mono';font-size:13px;line-height:1.6"></textarea>
@@ -824,6 +844,7 @@ async function recargar(){
     await cargarSinonimos();
     ITEMS.forEach(construirIndice);
     pintarSinonimos();
+    llenarMesesCifras();
     await cargarOfertas();
     await cargarApartados();
     $("#n-apa").textContent = activos().length;
@@ -1286,11 +1307,13 @@ function compararCortes(ant,act){
   claves.forEach(c=>{
     const i=porClave.get(c); if(!i) return;             // ya no está en el catálogo
     const a=A.get(c)||0, b=B.get(c)||0, d=b-a;
-    const costo=i.p1||0;
-    const reg={clave:c, desc:i.desc||"", ant:a, act:b, d, i, valor:Math.abs(d)*costo};
+    /* El inventario se valúa al COSTO, no al precio de venta: si no, el
+       "dinero parado" sale inflado por el margen y no cuadra con SAIT.  */
+    const cu=i.costo||0;
+    const reg={clave:c, desc:i.desc||"", ant:a, act:b, d, i, valor:Math.abs(d)*cu};
     if(d<0) salieron.push({...reg, sal:-d});
     else if(d>0) entraron.push({...reg, ent:d});
-    else if(a>0) quietas.push({...reg, parado:a*costo});
+    else if(a>0) quietas.push({...reg, parado:a*cu});
   });
   const dias=Math.max(1,Math.round((new Date(act.fecha)-new Date(ant.fecha))/864e5));
   salieron.forEach(o=>{ o.porDia=o.sal/dias; o.diasRest=o.porDia>0? o.act/o.porDia : 999; });
@@ -1322,6 +1345,7 @@ async function pintarMovimiento(){
   const pzEnt=entraron.reduce((s,o)=>s+o.ent,0);
   const dineroSal=salieron.reduce((s,o)=>s+o.sal*conIva(o.i.p1||0),0);
   const parado=quietas.reduce((s,o)=>s+o.parado,0);
+  const invTotalM=ITEMS.reduce((s,i)=>s+(i.exist||0)*(i.costo||0),0);
 
   const opt=c=>CORTES.map(x=>`<option value="${esc(x.id)}" ${x.id===c?"selected":""}>${esc(fechaCorta(x.fecha))} · ${x.n} claves</option>`).join("");
   $("#resumen-v").innerHTML=`<span>${dias} día(s) · ${pzSal} piezas salieron · ${pzEnt} entraron · ${pesos(dineroSal)} vendidos aprox.</span>`;
@@ -1379,8 +1403,10 @@ async function pintarMovimiento(){
     ${sec("rep","Reponer pronto — menos de 3 semanas de inventario",porRep,rSal,true,"")}
     ${sec("sal","Lo que más salió",masSal,rSal,true,"")}
     ${sec("qui",`Sin movimiento en ${dias} días`,quietasOrd,rQui,false,
-       `<span class="secc-alerta rojo-bg">${pesos(parado)} parados</span>`)}
-    ${sec("ent","Entró mercancía — aquí no se puede medir la venta",entraron,rEnt,false,"")}`;
+       `<span class="secc-alerta rojo-bg">${pesos(parado)} a costo</span>`)}
+    ${sec("ent","Entró mercancía — aquí no se puede medir la venta",entraron,rEnt,false,"")}
+    <p class="nota-metodo" style="margin-top:10px">Inventario total a costo: <b>${pesos(invTotalM)}</b>${
+      invTotalM?` · sin moverse ${pesos(parado)} (${Math.round(parado/invTotalM*100)}%)`:""}</p>`;
 
   $("#cmp-a").onchange=()=>{ cmpA=$("#cmp-a").value; pintarVentas(); };
   $("#cmp-b").onchange=()=>{ cmpB=$("#cmp-b").value; pintarVentas(); };
@@ -1446,12 +1472,25 @@ async function _pintarVentas(){
 const NOMMES={1:"enero",2:"febrero",3:"marzo",4:"abril",5:"mayo",6:"junio",
   7:"julio",8:"agosto",9:"septiembre",10:"octubre",11:"noviembre",12:"diciembre"};
 const etiqMes = p => { const [a,m]=p.split("-"); return `${NOMMES[+m]} ${a}`; };
+/* Días con datos de un mes. El mes en curso lleva solo los transcurridos:
+   si se divide entre 30 un mes de dos días, el ritmo de venta sale 15 veces
+   más bajo y la app diría que hay inventario de sobra.                   */
+function diasDelMes(p){
+  const [a,m]=p.split("-").map(Number);
+  const h=new Date();
+  return (h.getFullYear()===a && h.getMonth()+1===m) ? h.getDate() : new Date(a,m,0).getDate();
+}
+const mesEnCurso = p => { const [a,m]=p.split("-").map(Number); const h=new Date();
+  return h.getFullYear()===a && h.getMonth()+1===m; };
 let mesSel="";
 
 function pintarMensual(meses){
   if(!mesSel || !meses.some(d=>d.periodo===mesSel)) mesSel=meses[0].periodo;
   const usar = mesSel==="TODO" ? meses : meses.filter(d=>d.periodo===mesSel);
   const nMeses = usar.length;
+  // Se mide el ritmo sobre los días que realmente tienen datos
+  const diasTot = usar.reduce((s,d)=>s+diasDelMes(d.periodo),0);
+  const parcial = usar.filter(d=>mesEnCurso(d.periodo));
 
   // Acumula por clave sobre los meses elegidos
   const g=new Map();
@@ -1463,7 +1502,7 @@ function pintarMensual(meses){
      reporte de costo de SAIT: ese venía al doble en varias claves.      */
   const vendidas=[...g.values()].map(o=>{
     const i=porClave.get(o.clave);
-    const ex=i?disponible(i):0, porMes=o.cant/nMeses;
+    const ex=i?disponible(i):0, porMes=diasTot? o.cant/diasTot*30 : 0;
     const venta = o.imp>0 ? o.imp : o.cant*(i?.p1||0);     // importe real si lo hay
     const costo = o.cant*(i?.costo||0);
     return {...o, i, ex, porMes,
@@ -1472,14 +1511,25 @@ function pintarMensual(meses){
       estimado: !(o.imp>0)};
   });
   const pz=vendidas.reduce((s,o)=>s+o.cant,0);
-  const dinero=vendidas.reduce((s,o)=>s+o.venta,0);
+  const bruto=vendidas.reduce((s,o)=>s+o.venta,0);     // antes de descuento
   const conMargen=vendidas.filter(o=>o.margen!==null);
-  const vm=conMargen.reduce((s,o)=>s+o.venta,0), mg=conMargen.reduce((s,o)=>s+o.margen,0);
   const hayImporte=vendidas.some(o=>o.imp>0);
+  /* Las cifras del Resumen de notas mandan sobre la suma por artículo: esa
+     suma es el importe bruto y un costo estimado, no la venta real.      */
+  const ofi = usar.map(d=>d.oficial).filter(Boolean);
+  const of = ofi.length===usar.length && ofi.length
+    ? ofi.reduce((a,o)=>({sub:a.sub+o.sub, desc:a.desc+(o.desc||0), costo:a.costo+o.costo, docs:a.docs+(o.docs||0)}),
+                 {sub:0,desc:0,costo:0,docs:0})
+    : null;
 
   // Lo que tiene existencia y no vendió nada en el periodo
+  /* Inventario total a costo: da contexto a la cifra de parado y permite
+     comprobarla contra SAIT de un vistazo.                              */
+  const invTotal=ITEMS.reduce((s,i)=>s+(i.exist||0)*(i.costo||0),0);
+  const negativas=ITEMS.filter(i=>(i.exist||0)<0).length;
+  const sinCosto=ITEMS.filter(i=>(i.exist||0)>0 && !(i.costo>0)).length;
   const sinVenta=ITEMS.filter(i=>(i.exist||0)>0 && !g.has(i.clave))
-    .map(i=>({i, clave:i.clave, desc:i.desc||"", ex:i.exist, parado:i.exist*(i.p1||0)}))
+    .map(i=>({i, clave:i.clave, desc:i.desc||"", ex:i.exist, parado:i.exist*(i.costo||0)}))
     .sort((a,b)=>b.parado-a.parado);
   const parado=sinVenta.reduce((s,o)=>s+o.parado,0);
 
@@ -1490,14 +1540,15 @@ function pintarMensual(meses){
   const malMargen=conMargen.filter(o=>o.venta>0 && o.margen/o.venta<0.15)
     .sort((a,b)=>(a.margen/a.venta)-(b.margen/b.venta));
 
-  $("#resumen-v").innerHTML=`<span>${mesSel==="TODO"?`${nMeses} meses`:etiqMes(mesSel)} · ${pz} piezas · ${vendidas.length} artículos · ${pesos(dinero)}${hayImporte?"":" aprox."}${
-    conMargen.length&&vm?` · margen ${pesos(mg)} (${Math.round(mg/vm*100)}%)`:""}</span>`;
+  $("#resumen-v").innerHTML = of
+    ? `<span><b>${mesSel==="TODO"?`${nMeses} meses`:etiqMes(mesSel)}</b>${parcial.length?` · ${diasTot} días`:""} · ${pz} piezas · venta ${pesos(of.sub)} · costo ${pesos(of.costo)} · <b class="ok-txt">margen ${pesos(of.sub-of.costo)} (${Math.round((of.sub-of.costo)/of.sub*100)}%)</b>${of.docs?` · ${of.docs} notas`:""}</span>`
+    : `<span>${mesSel==="TODO"?`${nMeses} meses`:etiqMes(mesSel)}${parcial.length?` · ${diasTot} días`:""} · ${pz} piezas · ${vendidas.length} artículos · ${pesos(bruto)} antes de descuento</span>`;
 
   const rV=o=>`<div class="ren ${o.ex<=0?'alerta':''}">
     <span class="r-cla">${esc(o.clave)}</span>
     <span class="r-sec">${esc(o.desc)}</span>
     <span class="r-num alto">${o.cant}<em>pz</em></span>
-    <span class="r-din">${pesos(o.venta)}${o.estimado?'<em title="estimado con el precio de lista">~</em>':""}</span>
+    <span class="r-din" title="${o.estimado?"estimado con el precio de lista":"importe antes de descuento"}">${pesos(o.venta)}${o.estimado?"<em>~</em>":""}</span>
     <span class="r-mg ${o.margen!==null&&o.margen<0?'neg':''}">${
       o.margen===null?"":o.venta?Math.round(o.margen/o.venta*100)+"%":""}</span>
     <span class="r-hoy ${o.ex>0?'ok':''}">${o.i?o.ex:"—"}</span>
@@ -1532,14 +1583,23 @@ function pintarMensual(meses){
         ${meses.length>1?`<option value="TODO" ${mesSel==="TODO"?"selected":""}>Todos los meses juntos</option>`:""}
       </select>
     </div>
-    ${conMargen.length?"":`<p class="nota-metodo">Para ver el margen, sube el archivo de existencias de SAIT: trae la columna <b>Último Costo</b>, que es la que cuadra. El reporte de costo mensual no sirve para esto.</p>`}
+    ${parcial.length? `<p class="nota-metodo" style="border-left-color:var(--azul);background:var(--azul-claro)">
+      <b>${etiqMes(parcial[0].periodo)} va a la mitad</b>: lleva ${diasDelMes(parcial[0].periodo)} día(s).
+      El promedio mensual y los "meses que alcanza" se calculan proyectando ese ritmo a 30 días.</p>`:""}
+    ${of
+      ? `<p class="nota-metodo">Total del mes tomado del <b>Resumen de notas</b>${of.desc?` (ya descontados ${pesos(of.desc)} de descuentos)`:""}. Los renglones de abajo traen el importe <b>antes de descuento</b> y su margen es estimado con el último costo del catálogo, así que no suman exactamente el total.</p>`
+      : `<p class="nota-metodo">Estos importes vienen <b>antes de descuento</b> y el margen de cada renglón es estimado. Para la venta y el margen reales del mes, captura las cifras del <b>Resumen de notas</b> en Sincronizar → Cifras del mes.</p>`}
     ${sec("ago","Se vendió y ya no hay — venta que estás perdiendo",agotadas,rV,true,"")}
     ${sec("rep","Alcanza para menos de un mes",reponer,rV,true,"")}
     ${sec("top","Lo más vendido — por piezas",top,rV,false,"")}
     ${sec("din","Lo que más dinero deja",topDinero,rV,false,"")}
     ${sec("mar","Margen por debajo del 15% — revisar precio",malMargen,rV,false,"")}
     ${sec("sin",`Con existencia y sin vender en ${mesSel==="TODO"?"el periodo":etiqMes(mesSel)}`,sinVenta,rS,false,
-       `<span class="secc-alerta rojo-bg">${pesos(parado)} parados</span>`)}
+       `<span class="secc-alerta rojo-bg">${pesos(parado)} a costo</span>`)}
+    <p class="nota-metodo" style="margin-top:10px">Inventario total a costo: <b>${pesos(invTotal)}</b>${
+      invTotal?` · parado sin vender ${pesos(parado)} (${Math.round(parado/invTotal*100)}%)`:""}${
+      sinCosto?`<br>${sinCosto} artículo(s) con existencia no traen costo: sube el archivo de existencias de SAIT para que cuadre.`:""}${
+      negativas?`<br>${negativas} clave(s) con existencia negativa, que SAIT resta del total.`:""}</p>
     <div style="margin-top:14px"><button class="btn sec" id="exp-compra">Descargar lista de compra</button></div>`;
 
   $("#mes-sel").onchange=()=>{ mesSel=$("#mes-sel").value; pintarVentas(); };
@@ -1554,7 +1614,8 @@ function pintarMensual(meses){
     const filas=[...agotadas,...reponer].map(o=>({
       Clave:o.clave, Descripcion:o.desc,
       "Vendidas en el periodo":o.cant, "Promedio por mes":+o.porMes.toFixed(1),
-      "Venta del periodo":+o.venta.toFixed(2), "Margen %": o.margen!==null&&o.venta?Math.round(o.margen/o.venta*100):"",
+      "Importe antes de descuento":+o.venta.toFixed(2),
+      "Margen % estimado": o.margen!==null&&o.venta?Math.round(o.margen/o.venta*100):"",
       "Existencia hoy":o.ex,
       "Meses que alcanza": o.mesesRest>900?"":+o.mesesRest.toFixed(1),
       "Sugerido (2 meses)": Math.max(1,Math.ceil(o.porMes*2-o.ex)),
@@ -1589,7 +1650,7 @@ async function pintarDiario(){
     return {...o, disp, diasRest: o.porDia>0? disp/o.porDia : 999, i};
   }).filter(o=>o&&o.diasRest<21).sort((a,b)=>a.diasRest-b.diasRest);
   const quietos=ITEMS.filter(i=>(i.exist||0)>0 && !g.has(i.clave))
-    .sort((a,b)=>(b.exist||0)*(b.p1||0)-(a.exist||0)*(a.p1||0)).slice(0,20);
+    .sort((a,b)=>(b.exist||0)*(b.costo||0)-(a.exist||0)*(a.costo||0)).slice(0,20);
 
   const fV=o=>{
     const i=porClave.get(o.clave);
@@ -1613,7 +1674,7 @@ async function pintarDiario(){
       <div class="ficha-top"><span class="clave">${esc(i.clave)}</span>
         <span class="exist"><b>${i.exist}</b> pz paradas</span></div>
       <div class="desc">${esc(i.desc||"")}</div>
-      <div class="mini-dato">${i.p1?`${pesos(conIva(i.p1)*i.exist)} detenidos`:""} ${i.u1?"· "+esc(i.u1):""}</div>
+      <div class="mini-dato">${i.costo?`${pesos(i.costo*i.exist)} detenidos a costo`:""} ${i.u1?"· "+esc(i.u1):""}</div>
     </div>`;
   const bl=(t,l,f,c)=>l.length?`<h3 class="sec-tit ${c||""}">${t} (${l.length})</h3><div class="lista">${l.map(f).join("")}</div>`:"";
   $("#lista-ventas").innerHTML =
@@ -3023,6 +3084,45 @@ $("#archivo").onchange = async e=>{
   }
 };
 
+
+/* ============ CIFRAS OFICIALES DEL MES ============
+   El reporte por artículo sirve para el detalle, pero sus totales no son la
+   venta real: el importe viene antes de descuento y el costo trae partidas
+   que no son ventas. Estas cifras salen del Resumen de notas de SAIT y son
+   las que se muestran como total del mes.                                */
+async function llenarMesesCifras(){
+  const s=$("#cf-mes"); if(!s) return;
+  await cargarVentas();
+  const meses=(VENTAS||[]).filter(d=>d.periodo).sort((a,b)=>b.periodo.localeCompare(a.periodo));
+  s.innerHTML = meses.length
+    ? meses.map(d=>`<option value="${esc(d.periodo)}">${esc(etiqMes(d.periodo))}${d.oficial?" · ya capturado":""}</option>`).join("")
+    : `<option value="">Primero sube un reporte mensual de ventas</option>`;
+  const cargar=()=>{
+    const d=meses.find(x=>x.periodo===s.value), o=d?.oficial;
+    $("#cf-sub").value=o?.sub??""; $("#cf-desc").value=o?.desc??"";
+    $("#cf-cos").value=o?.costo??""; $("#cf-doc").value=o?.docs??"";
+    $("#cf-prev").innerHTML = o
+      ? `<div class="aviso bien">Capturado: venta ${pesos(o.sub)} · costo ${pesos(o.costo)} · margen ${pesos(o.sub-o.costo)} (${Math.round((o.sub-o.costo)/o.sub*100)}%)</div>` : "";
+  };
+  s.onchange=cargar; cargar();
+}
+
+$("#btn-cifras").onclick = async ()=>{
+  const p=$("#cf-mes").value;
+  if(!p){ aviso("Primero sube un reporte mensual de ventas."); return; }
+  const sub=+$("#cf-sub").value||0, desc=+$("#cf-desc").value||0,
+        costo=+$("#cf-cos").value||0, docs=+$("#cf-doc").value||0;
+  if(sub<=0){ aviso("El subtotal es el dato principal; escríbelo."); return; }
+  if(costo>sub){ aviso("El costo es mayor que la venta. Revisa que no hayas intercambiado los campos."); return; }
+  const b=$("#btn-cifras"); b.disabled=true; b.textContent="Guardando…";
+  try{
+    await setDoc(doc(db,COL_VENTAS,p),{oficial:{sub,desc,costo,docs,act:hoyISO()}},{merge:true});
+    VENTAS=null; await cargarVentas(); await llenarMesesCifras(); pintar();
+    $("#cf-prev").innerHTML=`<div class="aviso bien"><b>Guardado.</b> Margen del mes: ${pesos(sub-costo)} (${Math.round((sub-costo)/sub*100)}%)</div>`;
+  }catch(e){ $("#cf-prev").innerHTML=`<div class="aviso malo">${esc(e.message)}</div>`; }
+  b.disabled=false; b.textContent="Guardar cifras del mes";
+};
+
 $("#btn-import").onclick = async ()=>{
   if(!filasImport) return;
   if(!esAdmin && !(await pedirClave())) return;
@@ -3242,12 +3342,30 @@ $("#btn-diag").onclick = async ()=>{
     fila("Con categoría", conCat, conCat>0)+
     (()=>{ const cx=ITEMS.filter(i=>(i.exist||0)>0);
       const cf=cx.filter(i=>i.foto).length;
+      const cc=ITEMS.filter(i=>i.costo>0).length;
+      const inv=ITEMS.reduce((s,i)=>s+(i.exist||0)*(i.costo||0),0);
       return fila("Con existencia", cx.length, cx.length>0)+
              fila("De esos, con foto", cf, cf>0)+
-             fila("De esos, SIN foto", cx.length-cf, cx.length-cf===0); })()+
+             fila("De esos, SIN foto", cx.length-cf, cx.length-cf===0)+
+             fila("Con costo (para margen)", cc, cc>0)+
+             fila("Inventario a costo", pesos(inv), inv>0)+
+             (cc===0?`<div class="aviso malo">Ningún artículo tiene costo. El costo se empezó a importar hace poco: <b>vuelve a subir el archivo de existencias de SAIT</b> (el que trae la columna Último Costo) para que aparezcan el margen y el inventario parado.</div>`:""); })()+
     fila("Ofertas cargadas", OFERTAS.length, OFERTAS.length>0)+
     fila("Ofertas vigentes hoy", vig.length, vig.length>0)+
     fila("Artículos con descuento", conDesc, conDesc>0)+
+    (()=>{ const ms=(VENTAS||[]).filter(d=>d.periodo).sort((a,b)=>b.periodo.localeCompare(a.periodo));
+      if(!ms.length) return `<div class="aviso">Sin reportes mensuales de ventas cargados.</div>`;
+      return `<div class="diag-meses"><b>Meses de ventas cargados</b>`+ms.map(d=>{
+        const l=d.lineas||[];
+        const cCant=l.filter(x=>x.cant>0).length, cImp=l.filter(x=>x.imp>0).length;
+        return `<div class="diag ${cCant&&cImp?'ok':'mal'}"><span>${esc(etiqMes(d.periodo))}</span>
+          <b>${cCant} cant · ${cImp} imp${d.oficial?" · cifras ✓":""}</b></div>`;
+      }).join("")+`</div>`+
+      (ms.some(d=>!(d.lineas||[]).some(x=>x.imp>0))
+        ? `<div class="aviso">Algún mes no trae <b>importes</b>: sube también el reporte de <i>Ventas mensuales x artículo (importe)</i> de ese mes.</div>`:"")+
+      (ms.some(d=>!d.oficial)
+        ? `<div class="aviso">Algún mes no tiene las <b>cifras del Resumen de notas</b>, así que su total es el bruto antes de descuento.</div>`:"");
+    })()+
     (conCat===0?`<div class="aviso malo">Falta el archivo de <b>categorías</b>. Sin categoría no se puede aplicar ninguna oferta.</div>`:"")+
     (OFERTAS.length===0?`<div class="aviso malo">Falta el archivo de <b>promociones</b>, o no se pudo guardar.</div>`:"")+
     (conCat>0&&OFERTAS.length>0&&conDesc===0?`<div class="aviso malo">Los dos archivos están, pero ninguna categoría del catálogo coincide con las de las ofertas.<br>Categorías en ofertas: ${esc(OFERTAS.map(o=>o.cat).slice(0,6).join(", "))}</div>`:"");
