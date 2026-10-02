@@ -323,8 +323,16 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
   border-bottom:2px solid var(--ambar);padding:9px 14px;font-size:13px;line-height:1.35;color:#5C3D00}
 .banner.malo{background:#FDECEA;border-bottom-color:var(--rojo);color:var(--rojo);font-weight:600}
 .banner button{margin-left:auto;border:0;background:none;font-size:15px;opacity:.6;padding:0 4px}
-.tarjeta.peligro{border-color:var(--rojo);border-left:4px solid var(--rojo)}
 .rojo-txt{color:var(--rojo)}
+.cmp{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:10px;
+  background:var(--superficie);border:1px solid var(--linea);border-radius:var(--r);padding:10px 12px}
+.cmp label{font-family:Oswald;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--tinta-2)}
+.cmp select{width:auto;flex:1;min-width:150px;padding:7px 9px;font-size:13px}
+.flecha-cmp{color:var(--tinta-2);font-size:15px}
+.nota-metodo{font-size:11.5px;line-height:1.45;color:var(--tinta-2);margin:0 0 12px;
+  background:var(--ambar-claro);border-left:3px solid var(--ambar);border-radius:0 4px 4px 0;padding:8px 11px}
+.ren.alerta{background:#FDECEA}
+.secc-alerta.rojo-bg{background:var(--rojo)}
 @media(max-width:700px){
   .ren{flex-wrap:wrap;gap:4px 8px;padding:8px 11px}
   .r-pri,.r-cla{flex:0 0 auto}
@@ -457,6 +465,11 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 <!-- VENTAS -->
 <div class="panel oculto" id="p-ventas">
   <div class="filtros">
+    <span class="etiq-fila">Ver</span>
+    <button class="chip on" data-fv="mov">Movimiento de existencias</button>
+    <button class="chip" data-fv="sait">Reporte de SAIT</button>
+  </div>
+  <div class="filtros" id="dias-sait" style="display:none">
     <button class="chip" data-dv="7">7 días</button>
     <button class="chip on" data-dv="30">30 días</button>
     <button class="chip" data-dv="90">90 días</button>
@@ -503,14 +516,6 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
     <div id="prev-import"></div>
     <div style="height:12px"></div>
     <button class="btn" id="btn-import" disabled>Procesar archivo</button>
-  </div>
-  <div class="tarjeta peligro">
-    <h3>Limpiar el catálogo</h3>
-    <p>Si por error se importó el inventario de otro negocio, aquí se quita. Sube el archivo <b>correcto y completo</b> de Moto Pro: lo que no esté en él se borra del catálogo. Las claves con ubicación, foto, apartado o venta negada quedan protegidas.</p>
-    <input type="file" id="limp-file" accept=".xlsx,.xls,.csv" style="width:100%">
-    <div id="limp-prev"></div>
-    <div style="height:10px"></div>
-    <button class="btn sec" id="btn-limp" disabled>Borrar claves que sobran</button>
   </div>
   <div class="tarjeta">
     <h3>Sinónimos de búsqueda</h3>
@@ -574,6 +579,7 @@ const COL_NEGADAS = "motopro_negadas";
 const COL_APARTADOS = "motopro_apartados";
 const COL_CONFIG = "motopro_config";
 const COL_VENTAS = "motopro_ventas";
+const COL_CORTES = "motopro_cortes";
 const COL_CONTEOS = "motopro_conteos";
 const COL_LINEAS = "motopro_conteo_lineas";
 const COL_EVIDENCIA = "motopro_evidencia";
@@ -841,6 +847,12 @@ $$(".tab").forEach(b=>b.onclick=()=>{
 $$("[data-f]").forEach(b=>b.onclick=()=>{
   $$("[data-f]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   filtro=b.dataset.f; pintar();
+});
+$$("[data-fv]").forEach(b=>b.onclick=()=>{
+  $$("[data-fv]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  fuenteV=b.dataset.fv;
+  $("#dias-sait").style.display = fuenteV==="sait" ? "" : "none";
+  pintarVentas();
 });
 $$("[data-dv]").forEach(b=>b.onclick=()=>{
   $$("[data-dv]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
@@ -1225,13 +1237,164 @@ async function verDiferencias(t){
 }
 function slugNombre(s){ return normTexto(s).replace(/\s+/g,"_").slice(0,30); }
 
+/* ============ MOVIMIENTO POR EXISTENCIAS ============
+   Cada sincronización guarda un corte: la existencia de cada clave ese día.
+   Comparando dos cortes se deduce el movimiento sin necesidad del reporte
+   de ventas de SAIT.
+
+   LÍMITE IMPORTANTE, y por eso la pantalla lo dice: la diferencia es
+   entradas menos salidas, no ventas. Si una clave BAJA, lo que bajó sí
+   salió (y pudo salir más, si además entró mercancía): es un piso, nunca
+   exagera. Si SUBE, entró compra y lo vendido queda escondido dentro de
+   esa entrada. Por eso lo que subió se reporta aparte y no como venta.   */
+let CORTES=null, cmpA=null, cmpB=null;
+
+async function cargarCortes(){
+  if(CORTES) return CORTES;
+  try{
+    const s=await traer(COL_CORTES);
+    CORTES=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.id.localeCompare(a.id));
+  }catch(e){ CORTES=[]; }
+  return CORTES;
+}
+
+/* Guarda el corte del día. Dos arrays paralelos en vez de un mapa: las
+   claves traen guiones y símbolos que como nombre de campo dan problemas. */
+async function guardarCorte(filas){
+  const k=[], v=[];
+  filas.forEach(x=>{ if(x.exist!==null && x.exist!==0){ k.push(x.clave); v.push(x.exist); } });
+  if(!k.length) return;
+  const id=fechaISO(hoyISO());
+  try{
+    await setDoc(doc(db,COL_CORTES,id),{fecha:hoyISO(),n:k.length,k,v});
+    CORTES=null;
+  }catch(e){ console.error("guardarCorte",e); }
+}
+
+/* Compara dos cortes y devuelve el movimiento por clave */
+function compararCortes(ant,act){
+  const A=new Map(), B=new Map();
+  (ant.k||[]).forEach((c,i)=>A.set(c,(ant.v||[])[i]||0));
+  (act.k||[]).forEach((c,i)=>B.set(c,(act.v||[])[i]||0));
+  const claves=new Set([...A.keys(),...B.keys()]);
+  const salieron=[], entraron=[], quietas=[];
+  claves.forEach(c=>{
+    const i=porClave.get(c); if(!i) return;             // ya no está en el catálogo
+    const a=A.get(c)||0, b=B.get(c)||0, d=b-a;
+    const costo=i.p1||0;
+    const reg={clave:c, desc:i.desc||"", ant:a, act:b, d, i, valor:Math.abs(d)*costo};
+    if(d<0) salieron.push({...reg, sal:-d});
+    else if(d>0) entraron.push({...reg, ent:d});
+    else if(a>0) quietas.push({...reg, parado:a*costo});
+  });
+  const dias=Math.max(1,Math.round((new Date(act.fecha)-new Date(ant.fecha))/864e5));
+  salieron.forEach(o=>{ o.porDia=o.sal/dias; o.diasRest=o.porDia>0? o.act/o.porDia : 999; });
+  return {salieron,entraron,quietas,dias};
+}
+
+async function pintarMovimiento(){
+  await cargarCortes();
+  if(!CORTES.length){
+    $("#resumen-v").textContent="";
+    $("#lista-ventas").innerHTML=`<div class="vacio-msg"><div class="grande">Aún no hay cortes</div>
+      Cada vez que subas existencias en Sincronizar se guarda un corte. Con dos ya se puede comparar.</div>`;
+    return;
+  }
+  if(CORTES.length<2){
+    $("#resumen-v").textContent="";
+    $("#lista-ventas").innerHTML=`<div class="vacio-msg"><div class="grande">Solo hay un corte</div>
+      Guardado el ${esc(fechaCorta(CORTES[0].fecha))} con ${CORTES[0].n} claves.<br>
+      En la próxima sincronización ya se puede comparar y ver cómo se movió todo.</div>`;
+    return;
+  }
+  // Por defecto: el más reciente contra el anterior
+  if(!cmpB || !CORTES.some(c=>c.id===cmpB)) cmpB=CORTES[0].id;
+  if(!cmpA || !CORTES.some(c=>c.id===cmpA) || cmpA===cmpB) cmpA=CORTES[1].id;
+  const act=CORTES.find(c=>c.id===cmpB), ant=CORTES.find(c=>c.id===cmpA);
+  const {salieron,entraron,quietas,dias}=compararCortes(ant,act);
+
+  const pzSal=salieron.reduce((s,o)=>s+o.sal,0);
+  const pzEnt=entraron.reduce((s,o)=>s+o.ent,0);
+  const dineroSal=salieron.reduce((s,o)=>s+o.sal*conIva(o.i.p1||0),0);
+  const parado=quietas.reduce((s,o)=>s+o.parado,0);
+
+  const opt=c=>CORTES.map(x=>`<option value="${esc(x.id)}" ${x.id===c?"selected":""}>${esc(fechaCorta(x.fecha))} · ${x.n} claves</option>`).join("");
+  $("#resumen-v").innerHTML=`<span>${dias} día(s) · ${pzSal} piezas salieron · ${pzEnt} entraron · ${pesos(dineroSal)} vendidos aprox.</span>`;
+
+  /* Renglón de salida: lo que se movió y qué tan rápido */
+  const rSal=o=>`<div class="ren ${o.diasRest<7?'alerta':''}">
+    <span class="r-cla">${esc(o.clave)}</span>
+    <span class="r-sec">${esc(o.desc)}</span>
+    <span class="r-num alto">${o.sal}<em>sal</em></span>
+    <span class="r-ubi">${o.ant} → ${o.act}</span>
+    <span class="r-hoy ${o.act>0?'ok':''}">${o.act}</span>
+    <span class="r-fec">${o.diasRest>900?"—":Math.floor(o.diasRest)+" d"}</span>
+  </div>`;
+  const rEnt=o=>`<div class="ren">
+    <span class="r-cla">${esc(o.clave)}</span>
+    <span class="r-sec">${esc(o.desc)}</span>
+    <span class="r-num">+${o.ent}<em>ent</em></span>
+    <span class="r-ubi">${o.ant} → ${o.act}</span>
+  </div>`;
+  const rQui=o=>`<div class="ren">
+    <span class="r-cla">${esc(o.clave)}</span>
+    <span class="r-sec">${esc(o.desc)}</span>
+    <span class="r-num">${o.ant}<em>pz</em></span>
+    <span class="r-ubi">${esc(o.i.u1?[o.i.u1,o.i.u2].filter(Boolean).join(" "):"sin ubicar")}</span>
+    <span class="r-fec">${pesos(o.parado)}</span>
+  </div>`;
+
+  const porRep=salieron.filter(o=>o.diasRest<21).sort((a,b)=>a.diasRest-b.diasRest);
+  const masSal=[...salieron].sort((a,b)=>b.sal-a.sal);
+  const quietasOrd=[...quietas].sort((a,b)=>b.parado-a.parado);
+
+  const sec=(id,tit,arr,fn,abre,nota)=>{
+    if(!arr.length) return "";
+    const ab=secMov[id]!==false && abre;
+    return `<div class="secc">
+      <button class="secc-cab" data-secm="${id}">
+        <span class="flecha">${ab?"▾":"▸"}</span>
+        <span class="secc-tit">${tit}</span>
+        <span class="secc-num">${arr.length}</span>
+        ${nota||""}
+      </button>
+      <div class="secc-cuerpo ${ab?"":"oculto"}" id="secm-${id}">${arr.slice(0,300).map(fn).join("")}
+        ${arr.length>300?`<div class="mini-dato" style="padding:8px 12px">Mostrando 300 de ${arr.length}.</div>`:""}
+      </div></div>`;
+  };
+
+  $("#lista-ventas").innerHTML=`
+    <div class="cmp">
+      <label>Comparar</label>
+      <select id="cmp-a">${opt(cmpA)}</select>
+      <span class="flecha-cmp">→</span>
+      <select id="cmp-b">${opt(cmpB)}</select>
+    </div>
+    <p class="nota-metodo">Las bajadas de existencia son el <b>mínimo</b> que salió: si además entró mercancía en el periodo, salió más. Lo que subió entró por compra, y lo que se vendió de esas claves queda escondido dentro de la entrada.</p>
+    ${sec("rep","Reponer pronto — menos de 3 semanas de inventario",porRep,rSal,true,"")}
+    ${sec("sal","Lo que más salió",masSal,rSal,true,"")}
+    ${sec("qui",`Sin movimiento en ${dias} días`,quietasOrd,rQui,false,
+       `<span class="secc-alerta rojo-bg">${pesos(parado)} parados</span>`)}
+    ${sec("ent","Entró mercancía — aquí no se puede medir la venta",entraron,rEnt,false,"")}`;
+
+  $("#cmp-a").onchange=()=>{ cmpA=$("#cmp-a").value; pintarVentas(); };
+  $("#cmp-b").onchange=()=>{ cmpB=$("#cmp-b").value; pintarVentas(); };
+  $$("[data-secm]").forEach(b=>b.onclick=()=>{
+    const id=b.dataset.secm, c=$("#secm-"+id);
+    const abierto=!c.classList.contains("oculto");
+    c.classList.toggle("oculto"); secMov[id]=!abierto;
+    b.querySelector(".flecha").textContent=abierto?"▸":"▾";
+  });
+}
+let secMov={};
+
 /* ============ VENTAS ============
    Cada archivo diario de SAIT se guarda como un documento por fecha. Con
    varios días acumulados se puede calcular velocidad de venta, y de ahí
    cuántos días de inventario queda y qué no se ha movido.
    NOTA: las ventas NO descuentan existencias. La existencia sigue viniendo
    de la sincronización de SAIT, que es la única que conoce las entradas.  */
-let VENTAS=null, diasVta=30;
+let VENTAS=null, diasVta=30, fuenteV="mov";
 
 async function cargarVentas(){
   if(VENTAS) return VENTAS;
@@ -1264,6 +1427,7 @@ async function pintarVentas(){
   }
 }
 async function _pintarVentas(){
+  if(fuenteV==="mov") return pintarMovimiento();
   await cargarVentas();
   if(!VENTAS.length){
     $("#resumen-v").textContent="";
@@ -2666,90 +2830,6 @@ $("#archivo").onchange = async e=>{
   }
 };
 
-/* ============ LIMPIEZA DEL CATÁLOGO ============
-   Si se importa por error el inventario de otro negocio, sus claves quedan
-   mezcladas: la importación agrega con merge y nunca borra. Esto compara el
-   catálogo contra el archivo correcto y elimina lo que sobra.
-   Nunca borra a ciegas: primero muestra qué se va, y protege cualquier clave
-   que tenga trabajo encima (ubicación, foto, apartado o venta negada).   */
-let sobrantes=null;
-
-$("#limp-file").onchange = async e=>{
-  const f=e.target.files[0]; if(!f) return;
-  $("#limp-prev").innerHTML='<div class="resumen">Leyendo archivo…</div>';
-  $("#btn-limp").disabled=true; sobrantes=null;
-  try{
-    const wb=XLSX.read(await f.arrayBuffer(),{type:"array"});
-    const br=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:null});
-    let hi=-1;
-    for(let r=0;r<Math.min(20,br.length);r++)
-      if((br[r]||[]).map(c=>normTexto(c)).includes("CLAVE")){ hi=r; break; }
-    if(hi<0) throw new Error("No encontré una columna llamada 'Clave'.");
-    const ic=(br[hi]||[]).map(c=>normTexto(c)).indexOf("CLAVE");
-    const buenas=new Set();
-    for(let r=hi+1;r<br.length;r++){
-      let v=String((br[r]||[])[ic]??"").trim();
-      if(!v || v.toUpperCase()==="NAN") continue;
-      buenas.add(CLAVES_CORREGIDAS[v]||v);
-    }
-    if(buenas.size<50) throw new Error(`Solo encontré ${buenas.size} claves. Revisa que sea el archivo completo.`);
-
-    await cargarApartados(); await cargarNegadas();
-    const conApartado=new Set((APARTADOS||[]).map(a=>a.clave).filter(Boolean));
-    const conNegada=new Set((NEGADAS||[]).map(x=>x.clave).filter(Boolean));
-    const fuera=ITEMS.filter(i=>!buenas.has(i.clave));
-    const tocadas=fuera.filter(i=>i.u1 || i.foto || conApartado.has(i.clave) || conNegada.has(i.clave));
-    const limpias=fuera.filter(i=>!tocadas.includes(i));
-    sobrantes={limpias,tocadas,buenas:buenas.size};
-
-    $("#limp-prev").innerHTML=`
-      <div class="aviso ${fuera.length?"":"bien"}">
-        <b>${buenas.size} claves en el archivo</b> · ${ITEMS.length} en la app<br>
-        ${fuera.length? `<b class="rojo-txt">${fuera.length} claves sobran</b> y se pueden borrar.`
-                      : "No sobra ninguna clave. El catálogo ya está limpio."}
-      </div>
-      ${tocadas.length?`<div class="aviso malo"><b>${tocadas.length} de las sobrantes tienen trabajo encima</b>
-        (ubicación, foto, apartado o venta negada). Esas NO se borran, por si son de Moto Pro y
-        faltan en el archivo. Revísalas aparte.</div>`:""}
-      ${limpias.length?`<div class="mini-dato" style="margin-top:8px">Primeras que se borrarían:</div>
-        <div class="lista" style="margin-top:6px;max-height:190px;overflow-y:auto">${
-          limpias.slice(0,25).map(i=>`<div class="ren"><span class="r-cla">${esc(i.clave)}</span>
-            <span class="r-sec">${esc(i.desc||"")}</span>
-            <span class="r-num">${i.exist||0}<em>pz</em></span></div>`).join("")}</div>`:""}`;
-    $("#btn-limp").disabled=!limpias.length;
-    $("#btn-limp").textContent=limpias.length?`Borrar ${limpias.length} claves que sobran`:"Nada que borrar";
-  }catch(err){
-    sobrantes=null; $("#btn-limp").disabled=true;
-    $("#limp-prev").innerHTML=`<div class="aviso malo"><b>No se pudo leer el archivo.</b><br>${esc(err.message)}</div>`;
-  }
-};
-
-$("#btn-limp").onclick = async ()=>{
-  if(!sobrantes || !sobrantes.limpias.length) return;
-  if(!esAdmin && !(await pedirClave())) return;
-  const n=sobrantes.limpias.length;
-  const resp=prompt(`Se van a borrar ${n} claves del catálogo. Esto no se puede deshacer.\n\nEscribe BORRAR para confirmar:`);
-  if(resp!=="BORRAR"){ aviso("Cancelado. No se borró nada."); return; }
-  const b=$("#btn-limp"); b.disabled=true;
-  let hechas=0;
-  try{
-    for(let s=0;s<sobrantes.limpias.length;s+=400){
-      const trozo=sobrantes.limpias.slice(s,s+400);
-      const lote=writeBatch(db);
-      trozo.forEach(i=>lote.delete(doc(db,COLECCION,idDoc(i.clave))));
-      await lote.commit();
-      hechas+=trozo.length;
-      b.textContent=`Borrando ${hechas} / ${n}…`;
-    }
-    $("#limp-prev").innerHTML=`<div class="aviso bien"><b>${hechas} claves borradas.</b> El catálogo quedó limpio.</div>`;
-    sobrantes=null; $("#limp-file").value="";
-    await recargar();
-  }catch(e){
-    $("#limp-prev").innerHTML=`<div class="aviso malo"><b>Se interrumpió tras borrar ${hechas}.</b><br>${esc(e.message)}<br>Vuelve a subir el archivo y repite.</div>`;
-  }
-  b.disabled=false; b.textContent="Borrar claves que sobran";
-};
-
 $("#btn-import").onclick = async ()=>{
   if(!filasImport) return;
   if(!esAdmin && !(await pedirClave())) return;
@@ -2806,7 +2886,14 @@ $("#btn-import").onclick = async ()=>{
       b.textContent=`Guardando ${hechas} / ${filasImport.length}…`;
     }
     b.textContent="Procesar archivo";
-    $("#prev-import").innerHTML=`<div class="aviso bien"><b>Listo.</b> ${hechas} claves guardadas, ${nuevas} nuevas.</div>`;
+    /* Guarda la foto de existencias del día: es lo que permite medir después
+       cómo se movió la mercancía sin depender del reporte de ventas.      */
+    let corte="";
+    if(filasImport.some(x=>x.exist!==null)){
+      await guardarCorte(filasImport);
+      corte=" Se guardó el corte de existencias de hoy.";
+    }
+    $("#prev-import").innerHTML=`<div class="aviso bien"><b>Listo.</b> ${hechas} claves guardadas, ${nuevas} nuevas.${corte}</div>`;
     await recargar();
     await cargarNegadas();
     const listos=esperando().filter(yaLlego).length;
