@@ -1355,6 +1355,7 @@ async function pintarMovimiento(){
     <span class="r-cla">${esc(o.clave)}</span>
     <span class="r-sec">${esc(o.desc)}</span>
     <span class="r-num alto">${o.sal}<em>sal</em></span>
+    <span class="r-din">${pesos(o.sal*conIva(o.i.p1||0))}</span>
     <span class="r-ubi">${o.ant} → ${o.act}</span>
     <span class="r-hoy ${o.act>0?'ok':''}">${o.act}</span>
     <span class="r-fec">${o.diasRest>900?"—":Math.floor(o.diasRest)+" d"}</span>
@@ -1374,7 +1375,11 @@ async function pintarMovimiento(){
   </div>`;
 
   const porRep=salieron.filter(o=>o.diasRest<21).sort((a,b)=>a.diasRest-b.diasRest);
+  salieron.forEach(o=>{ o.dinero=o.sal*conIva(o.i.p1||0); });
   const masSal=[...salieron].sort((a,b)=>b.sal-a.sal);
+  /* Lo caro se vende de a una pieza: los cascos son el 5% de las piezas y
+     casi un tercio del dinero. Ordenado solo por piezas, no aparecen.   */
+  const masDinero=[...salieron].sort((a,b)=>b.dinero-a.dinero);
   const quietasOrd=[...quietas].sort((a,b)=>b.parado-a.parado);
 
   const sec=(id,tit,arr,fn,abre,nota)=>{
@@ -1401,7 +1406,8 @@ async function pintarMovimiento(){
     </div>
     <p class="nota-metodo">Las bajadas de existencia son el <b>mínimo</b> que salió: si además entró mercancía en el periodo, salió más. Lo que subió entró por compra, y lo que se vendió de esas claves queda escondido dentro de la entrada.</p>
     ${sec("rep","Reponer pronto — menos de 3 semanas de inventario",porRep,rSal,true,"")}
-    ${sec("sal","Lo que más salió",masSal,rSal,true,"")}
+    ${sec("din","Lo que más dinero movió",masDinero,rSal,true,"")}
+    ${sec("sal","Lo que más salió — por piezas",masSal,rSal,false,"")}
     ${sec("qui",`Sin movimiento en ${dias} días`,quietasOrd,rQui,false,
        `<span class="secc-alerta rojo-bg">${pesos(parado)} a costo</span>`)}
     ${sec("ent","Entró mercancía — aquí no se puede medir la venta",entraron,rEnt,false,"")}
