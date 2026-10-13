@@ -517,6 +517,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 
 <!-- ADMIN -->
 <div class="panel oculto" id="p-admin">
+  <div id="estado-sync"></div>
   <div class="tarjeta">
     <h3>Cargar archivo de SAIT</h3>
     <p>Sube el Excel de existencias. La app actualiza descripciones y cantidades, y manda las claves nuevas a <b>Sin ubicar</b>. Las ubicaciones que ya capturaste no se tocan.</p>
@@ -587,7 +588,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, getDocs, getDocsFromCache, getDoc, doc, setDoc, deleteDoc, writeBatch
+  collection, getDocs, getDocsFromCache, getDoc, doc, setDoc, deleteDoc, writeBatch,
+  query, where
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ============ CONFIGURACIÓN ============ */
@@ -775,6 +777,7 @@ function coincide(i,t){
 
 /* ============ ESTADO ============ */
 let db, ITEMS=[], porClave=new Map(), esAdmin=false, filtro="todo", pestana="buscar";
+let ULTIMA_CARGA=null;   // cómo se cargó el catálogo la última vez
 let catSel="";
 let filasImport=null;
 
@@ -820,6 +823,63 @@ function avisoGlobal(msg, malo){
 
 function estado(txt, clase){ $("#txt-estado").textContent=txt; $("#punto").className="punto "+(clase||""); }
 
+/* ============ CARGA DEL CATÁLOGO ============
+   Firestore cobra por documento leído, y el plan gratuito da 50,000 al día.
+   Bajar las ~2,900 claves cada vez que alguien abre la app gastaba la cuota
+   en quince aperturas, y entonces la app dejaba de cargar para todos.
+
+   En vez de eso: se usa lo que ya quedó guardado en el equipo (no se cobra) y
+   solo se piden al servidor las claves que cambiaron desde la última vez. Un
+   día normal son decenas, no miles. Cada escritura sobre el catálogo marca
+   su fecha en "act" — por eso importa que TODAS lo hagan.
+
+   Una vez por semana se baja todo de nuevo, para que no se vaya acumulando
+   diferencia si algo se borró o se escribió sin marcar fecha.            */
+const LLAVE_ACT  = "motopro_ultimo_act";
+const LLAVE_FULL = "motopro_ultima_completa";
+const DIAS_RECARGA_COMPLETA = 7;
+
+function leerLocal(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function grabarLocal(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+
+function tocaRecargaCompleta(){
+  const u = leerLocal(LLAVE_FULL);
+  if(!u) return true;
+  return (Date.now() - new Date(u).getTime()) > DIAS_RECARGA_COMPLETA*86400000;
+}
+
+async function traerCatalogo(forzarCompleta){
+  const desde = leerLocal(LLAVE_ACT);
+
+  if(!forzarCompleta && desde && !tocaRecargaCompleta()){
+    try{
+      const local = await getDocsFromCache(collection(db,COLECCION));
+      if(local.size > 100){
+        const cambios = await getDocs(query(collection(db,COLECCION), where("act",">",desde)));
+        const mapa = new Map(local.docs.map(d=>[d.id,d.data()]));
+        cambios.docs.forEach(d=>mapa.set(d.id,d.data()));
+        return { items:[...mapa.values()], leidos:cambios.size, parcial:true };
+      }
+    }catch(e){ console.warn("carga parcial no disponible",e); }
+  }
+
+  const snap = await traer(COLECCION);
+  grabarLocal(LLAVE_FULL, new Date().toISOString());
+  return { items:snap.docs.map(d=>d.data()), leidos:snap.size,
+           parcial:false, delCache:snap.metadata.fromCache };
+}
+
+/* Guarda la fecha más reciente que se vio, que es desde dónde pedir la próxima.
+   Se le restan dos segundos a propósito: si algo se escribió en el mismo
+   instante que el corte, más vale volver a traerlo que perderlo. */
+function marcarUltimoAct(items){
+  let max = "";
+  for(const i of items){ if(i.act && i.act > max) max = i.act; }
+  if(!max) return;
+  const t = new Date(max).getTime();
+  grabarLocal(LLAVE_ACT, isNaN(t) ? max : new Date(t-2000).toISOString());
+}
+
 /* ============ ARRANQUE ============ */
 (async function(){
   try{
@@ -832,10 +892,11 @@ function estado(txt, clase){ $("#txt-estado").textContent=txt; $("#punto").class
   await recargar();
 })();
 
-async function recargar(){
+async function recargar(forzarCompleta){
   try{
-    const snap = await traer(COLECCION);
-    ITEMS = snap.docs.map(d=>d.data());
+    const cat = await traerCatalogo(forzarCompleta);
+    ITEMS = cat.items;
+    marcarUltimoAct(ITEMS);
     porClave = new Map(ITEMS.map(i=>[i.clave,i]));
     ITEMS.forEach(construirIndice);
     pintarTipos(); pintarMotos();
@@ -849,7 +910,8 @@ async function recargar(){
     await cargarApartados();
     $("#n-apa").textContent = activos().length;
     cargarNegadas().then(()=>{ if(pestana==="buscar") pintarBuscar(); });
-    estado(snap.metadata.fromCache?"Sin conexión":"En línea", snap.metadata.fromCache?"":"ok");
+    estado(cat.delCache?"Sin conexión":"En línea", cat.delCache?"":"ok");
+    ULTIMA_CARGA = cat;
     pintar();
   }catch(e){
     estado("Error","err");
@@ -868,8 +930,21 @@ $$(".tab").forEach(b=>b.onclick=()=>{
   $$(".tab").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   pestana=b.dataset.t;
   ["buscar","mapa","pend","conteo","ventas","apartados","negadas","admin"].forEach(t=>$("#p-"+t).classList.toggle("oculto",t!==pestana));
+  if(pestana==="admin") pintarEstadoSync().then(conectarRecargaFull);
   pintar();
 });
+
+/* El botón se vuelve a crear cada que se pinta la tarjeta, por eso se conecta aquí */
+function conectarRecargaFull(){
+  const b=$("#btn-recarga-full"); if(!b) return;
+  b.onclick = async ()=>{
+    b.disabled=true; b.textContent="Bajando catálogo completo…";
+    try{ await recargar(true); }finally{
+      b.disabled=false; b.textContent="Volver a bajar todo el catálogo";
+      pintarEstadoSync().then(conectarRecargaFull);
+    }
+  };
+}
 $$("[data-f]").forEach(b=>b.onclick=()=>{
   $$("[data-f]").forEach(x=>x.classList.remove("on")); b.classList.add("on");
   filtro=b.dataset.f; pintar();
@@ -895,6 +970,47 @@ $$("[data-ord]").forEach(b=>b.onclick=()=>{
 });
 
 let tmr; $("#q").addEventListener("input",()=>{clearTimeout(tmr);catSel="";tmr=setTimeout(pintar,110)});
+
+/* ============ ESTADO DE LA SINCRONIZACIÓN AUTOMÁTICA ============
+   El script de Drive deja constancia en motopro_config/sync_auto cada vez
+   que corre. Esto solo lo muestra, para saber de un golpe si la app está
+   al día sin tener que abrir nada más.                                  */
+async function pintarEstadoSync(){
+  const caja = $("#estado-sync"); if(!caja) return;
+  let d = null;
+  try{
+    const s = await getDoc(doc(db,COL_CONFIG,"sync_auto"));
+    if(s.exists()) d = s.data();
+  }catch(e){ caja.innerHTML=""; return; }
+  if(!d || !d.fecha){ caja.innerHTML=""; return; }
+
+  const horas = (Date.now() - new Date(d.fecha).getTime())/3600000;
+  const alDia = horas < 36;
+  caja.innerHTML = `<div class="tarjeta" style="border-left:3px solid ${alDia?"#16a34a":"#d97706"}">
+    <h3 style="margin-bottom:6px">Sincronización automática</h3>
+    <p style="margin:0">
+      ${alDia
+        ? `Al día. Última corrida el <b>${fechaCorta(d.fecha)}</b> a las <b>${horaCorta(d.fecha)}</b>.`
+        : `<b>Lleva ${Math.round(horas/24)} días sin correr.</b> Revisa que el archivo esté llegando a la carpeta de Drive.`}
+      ${d.filas?`<br><span style="font-size:12px;opacity:.7">${d.filas} claves leídas${d.cambios!=null?`, ${d.cambios} con cambios`:""}${d.archivo?` — ${esc(d.archivo)}`:""}</span>`:""}
+    </p>
+  </div>` + tarjetaCarga();
+}
+
+/* Cómo se cargó el catálogo: es lo que explica el consumo de la cuota */
+function tarjetaCarga(){
+  const c = ULTIMA_CARGA; if(!c) return "";
+  return `<div class="tarjeta">
+    <h3 style="margin-bottom:6px">Carga del catálogo</h3>
+    <p style="margin:0 0 10px">
+      ${c.parcial
+        ? `Esta vez solo se pidieron al servidor <b>${c.leidos}</b> clave(s), las que cambiaron. El resto salió de lo guardado en este equipo.`
+        : `Se bajó el catálogo completo: <b>${c.leidos}</b> claves. Las siguientes aperturas ya serán ligeras.`}
+      <br><span style="font-size:12px;opacity:.7">${ITEMS.length} artículos en total. El plan gratuito de Firebase da 50,000 lecturas al día.</span>
+    </p>
+    <button class="btn sec" id="btn-recarga-full">Volver a bajar todo el catálogo</button>
+  </div>`;
+}
 
 /* ============ RENDER ============ */
 function tieneUbic(i){ return !!(i.u1); }
@@ -1320,8 +1436,19 @@ function compararCortes(ant,act){
   return {salieron,entraron,quietas,dias};
 }
 
+/* Venta registrada de una clave en el mes del corte, según el reporte de
+   SAIT. Es lo único que destapa lo que se vendió de algo que además
+   recibió mercancía: ahí la diferencia de existencias no alcanza.      */
+function ventaDelMes(clave, fechaCorte){
+  const p=fechaISO(fechaCorte).slice(0,7);
+  const d=(VENTAS||[]).find(x=>x.periodo===p);
+  if(!d) return null;
+  const l=(d.lineas||[]).find(x=>x.clave===clave);
+  return l? {cant:l.cant||0, imp:l.imp||0, periodo:p} : {cant:0, imp:0, periodo:p};
+}
+
 async function pintarMovimiento(){
-  await cargarCortes();
+  await cargarCortes(); await cargarVentas();
   if(!CORTES.length){
     $("#resumen-v").textContent="";
     $("#lista-ventas").innerHTML=`<div class="vacio-msg"><div class="grande">Aún no hay cortes</div>
@@ -1360,12 +1487,17 @@ async function pintarMovimiento(){
     <span class="r-hoy ${o.act>0?'ok':''}">${o.act}</span>
     <span class="r-fec">${o.diasRest>900?"—":Math.floor(o.diasRest)+" d"}</span>
   </div>`;
-  const rEnt=o=>`<div class="ren">
-    <span class="r-cla">${esc(o.clave)}</span>
-    <span class="r-sec">${esc(o.desc)}</span>
-    <span class="r-num">+${o.ent}<em>ent</em></span>
-    <span class="r-ubi">${o.ant} → ${o.act}</span>
-  </div>`;
+  const rEnt=o=>{
+    const v=ventaDelMes(o.clave, act.fecha);
+    return `<div class="ren ${v&&v.cant>0?'ok':''}">
+      <span class="r-cla">${esc(o.clave)}</span>
+      <span class="r-sec">${esc(o.desc)}</span>
+      <span class="r-num">+${o.ent}<em>ent</em></span>
+      <span class="r-din">${v&&v.cant>0?`${v.cant} vend.`:""}</span>
+      <span class="r-ubi">${o.ant} → ${o.act}</span>
+      <span class="r-fec">${v&&v.imp>0?pesos(v.imp):""}</span>
+    </div>`;
+  };
   const rQui=o=>`<div class="ren">
     <span class="r-cla">${esc(o.clave)}</span>
     <span class="r-sec">${esc(o.desc)}</span>
@@ -1374,6 +1506,12 @@ async function pintarMovimiento(){
     <span class="r-fec">${pesos(o.parado)}</span>
   </div>`;
 
+  /* Vendidas que además recibieron mercancía: solo se ven con el reporte */
+  const entConVenta=entraron.map(o=>{
+    const v=ventaDelMes(o.clave, act.fecha);
+    return v&&v.cant>0 ? {...o, vend:v.cant, vimp:v.imp} : null;
+  }).filter(Boolean).sort((a,b)=>b.vimp-a.vimp);
+  const hayMes = (VENTAS||[]).some(d=>d.periodo===fechaISO(act.fecha).slice(0,7));
   const porRep=salieron.filter(o=>o.diasRest<21).sort((a,b)=>a.diasRest-b.diasRest);
   salieron.forEach(o=>{ o.dinero=o.sal*conIva(o.i.p1||0); });
   const masSal=[...salieron].sort((a,b)=>b.sal-a.sal);
@@ -1410,7 +1548,18 @@ async function pintarMovimiento(){
     ${sec("sal","Lo que más salió — por piezas",masSal,rSal,false,"")}
     ${sec("qui",`Sin movimiento en ${dias} días`,quietasOrd,rQui,false,
        `<span class="secc-alerta rojo-bg">${pesos(parado)} a costo</span>`)}
-    ${sec("ent","Entró mercancía — aquí no se puede medir la venta",entraron,rEnt,false,"")}
+    ${entConVenta.length? sec("evt","Se vendieron aunque entró mercancía — según el reporte del mes",entConVenta,
+        o=>`<div class="ren ok">
+          <span class="r-cla">${esc(o.clave)}</span>
+          <span class="r-sec">${esc(o.desc)}</span>
+          <span class="r-num alto">${o.vend}<em>vend</em></span>
+          <span class="r-din">${pesos(o.vimp)}</span>
+          <span class="r-ubi">+${o.ent} entraron</span>
+          <span class="r-hoy ok">${o.act}</span>
+        </div>`, true,
+        `<span class="secc-alerta">${pesos(entConVenta.reduce((s,o)=>s+o.vimp,0))}</span>`) : ""}
+    ${sec("ent","Entró mercancía"+(hayMes?"":" — su venta no se puede medir sin el reporte del mes"),entraron,rEnt,false,"")}
+    ${!hayMes&&entraron.length? `<p class="nota-metodo">${entraron.length} clave(s) recibieron mercancía en este periodo y su venta queda escondida en la entrada. Sube el reporte de <b>ventas por artículo</b> del mes en Sincronizar y aparecerán aquí con lo que realmente se vendió.</p>`:""}
     <p class="nota-metodo" style="margin-top:10px">Inventario total a costo: <b>${pesos(invTotalM)}</b>${
       invTotalM?` · sin moverse ${pesos(parado)} (${Math.round(parado/invTotalM*100)}%)`:""}</p>`;
 
@@ -2599,7 +2748,7 @@ async function marcarConFoto(clave, el){
   if(filtro==="sinfoto" && el){        // ya no pertenece a esta lista
     const card=el.closest(".ficha"); if(card) card.classList.add("resuelta");
   }
-  try{ await setDoc(doc(db,COLECCION,idDoc(clave)),{foto:true},{merge:true}); }catch(e){}
+  try{ await setDoc(doc(db,COLECCION,idDoc(clave)),{foto:true,act:hoyISO()},{merge:true}); }catch(e){}
 }
 
 /* Carga las miniaturas solo cuando la tarjeta entra en pantalla */
@@ -2680,7 +2829,7 @@ async function guardarFoto(clave,dataUrl){
   cacheFotos.delete(clave);           // la grande se relee si hace falta
   /* Marca en el propio artículo que ya tiene foto. Así contar cuántas
      faltan es instantáneo, sin recorrer la colección de imágenes.        */
-  await setDoc(doc(db,COLECCION,idDoc(clave)),{foto:true},{merge:true});
+  await setDoc(doc(db,COLECCION,idDoc(clave)),{foto:true,act:hoyISO()},{merge:true});
   const it=porClave.get(clave); if(it) it.foto=true;
 }
 
@@ -3023,7 +3172,7 @@ $("#archivo").onchange = async e=>{
     if(hi<0) throw new Error("No encontré una columna llamada 'Clave' en las primeras 20 filas.");
     const cab = (bruto[hi]||[]).map(c=>limpiar(c));
     const col = n => cab.findIndex(c=>c===n);
-    const iC=col("CLAVE"), iD=cab.findIndex(c=>c.startsWith("DESCRIPCION")),
+    const iC=col("CLAVE"), iD=cab.findIndex(c=>c.startsWith("DESCRIP")),
           iE=cab.findIndex(c=>c.startsWith("EXISTENCIA SISTEMA"))>=0?cab.findIndex(c=>c.startsWith("EXISTENCIA SISTEMA")):cab.findIndex(c=>c.startsWith("EXISTENCIA")),
           iU1=cab.findIndex(c=>c==="UBICACION 1"), iU2=cab.findIndex(c=>c==="UBICACION 2"),
           iU3=cab.findIndex(c=>c==="UBICACION 3"), iO=cab.findIndex(c=>c.startsWith("OBSERVACION")),
@@ -3031,7 +3180,11 @@ $("#archivo").onchange = async e=>{
           iP1=cab.findIndex(c=>c==="PRECIO 1"), iP2=cab.findIndex(c=>c==="PRECIO 2"),
           iP3=cab.findIndex(c=>c==="PRECIO 3"),
           iCat=cab.findIndex(c=>c.startsWith("CATEGO")), iPrv=cab.findIndex(c=>c.startsWith("PROVEEDOR")),
-          iUC=cab.findIndex(c=>c.startsWith("ULTIMO COSTO")||c==="COSTO UNITARIO");
+          /* SAIT exporta el costo con nombres distintos según el reporte:
+             "Último Costo", "ultcosto", "Costo Unitario". Si no se reconoce,
+             el margen sale mal sin que nada avise.                        */
+          iUC=cab.findIndex(c=>c.startsWith("ULTIMO COSTO")||c.startsWith("ULT COSTO")
+                             ||c==="ULTCOSTO"||c==="COSTO UNITARIO");
     const traeUbic = iU1>=0, traePrecio = iP1>=0, traeCat = iCat>=0;
     filasImport=[]; let corregidas=0;
     for(let r=hi+1;r<bruto.length;r++){
@@ -3287,7 +3440,7 @@ $("#btn-indice").onclick = async ()=>{
       const lote=writeBatch(db); let hay=false;
       ITEMS.slice(i,i+400).forEach(it=>{
         const tiene=con.has(it.clave);
-        if(tiene!==!!it.foto){ lote.set(doc(db,COLECCION,idDoc(it.clave)),{foto:tiene},{merge:true}); it.foto=tiene; hay=true; if(tiene)n++; }
+        if(tiene!==!!it.foto){ lote.set(doc(db,COLECCION,idDoc(it.clave)),{foto:tiene,act:hoyISO()},{merge:true}); it.foto=tiene; hay=true; if(tiene)n++; }
       });
       if(hay) await lote.commit();
     }
