@@ -454,6 +454,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 
 <!-- MAPA -->
 <div class="panel oculto" id="p-mapa">
+  <div id="nivel-inv"></div>
   <div class="resumen" id="resumen-m"></div>
   <div id="mapa"></div>
 </div>
@@ -981,12 +982,23 @@ async function pintarEstadoSync(){
   try{
     const s = await getDoc(doc(db,COL_CONFIG,"sync_auto"));
     if(s.exists()) d = s.data();
-  }catch(e){ caja.innerHTML=""; return; }
-  if(!d || !d.fecha){ caja.innerHTML=""; return; }
+  }catch(e){ /* sin conexión: igual se muestra el resto */ }
+  caja.innerHTML = tarjetaSync(d) + tarjetaCarga();
+}
 
+/* Siempre se pinta algo, incluso si el sync nunca ha corrido: si no, no hay
+   manera de distinguir "no subí la versión nueva" de "todavía no sincroniza". */
+function tarjetaSync(d){
+  if(!d || !d.fecha){
+    return `<div class="tarjeta" style="border-left:3px solid var(--concreto)">
+      <h3 style="margin-bottom:6px">Sincronización automática</h3>
+      <p style="margin:0">Todavía no ha corrido ninguna vez. Cuando el script de Drive
+      escriba por primera vez, aquí va a aparecer la fecha y cuántas claves cambiaron.</p>
+    </div>`;
+  }
   const horas = (Date.now() - new Date(d.fecha).getTime())/3600000;
   const alDia = horas < 36;
-  caja.innerHTML = `<div class="tarjeta" style="border-left:3px solid ${alDia?"#16a34a":"#d97706"}">
+  return `<div class="tarjeta" style="border-left:3px solid ${alDia?"#16a34a":"#d97706"}">
     <h3 style="margin-bottom:6px">Sincronización automática</h3>
     <p style="margin:0">
       ${alDia
@@ -994,7 +1006,7 @@ async function pintarEstadoSync(){
         : `<b>Lleva ${Math.round(horas/24)} días sin correr.</b> Revisa que el archivo esté llegando a la carpeta de Drive.`}
       ${d.filas?`<br><span style="font-size:12px;opacity:.7">${d.filas} claves leídas${d.cambios!=null?`, ${d.cambios} con cambios`:""}${d.archivo?` — ${esc(d.archivo)}`:""}</span>`:""}
     </p>
-  </div>` + tarjetaCarga();
+  </div>`;
 }
 
 /* Cómo se cargó el catálogo: es lo que explica el consumo de la cuota */
@@ -1411,6 +1423,125 @@ async function guardarCorte(filas){
     await setDoc(doc(db,COL_CORTES,id),{fecha:hoyISO(),n:k.length,k,v});
     CORTES=null;
   }catch(e){ console.error("guardarCorte",e); }
+}
+
+/* ============ NIVEL DE INVENTARIO ============
+   Los cortes diarios guardan cuántas piezas había de cada clave. Para ver si
+   el inventario sube o baja, se valúan TODOS los cortes con los costos de
+   hoy. Así la línea refleja movimiento de mercancía y no cambios de costo:
+   si sube, es que hay más piezas, no que subió un precio.               */
+function valuarCorte(c){
+  const k=c.k||[], v=c.v||[];
+  let valor=0, piezas=0, neg=0, valorNeg=0;
+  for(let i=0;i<k.length;i++){
+    const q=v[i]||0, it=porClave.get(k[i]);
+    const costo = it ? (it.costo||0) : 0;
+    valor += q*costo;
+    if(q>0) piezas += q; else if(q<0){ neg++; valorNeg += q*costo; }
+  }
+  return { valor, piezas, claves:k.length, neg, valorNeg };
+}
+
+/* Línea simple en SVG: no hay librería de gráficas y tampoco hace falta */
+function lineaSVG(puntos, ancho, alto){
+  if(puntos.length<2) return "";
+  const vals=puntos.map(p=>p.y);
+  const min=Math.min(...vals), max=Math.max(...vals);
+  const rango=(max-min)||1, pad=8;
+  const px=i=>pad+(ancho-2*pad)*(i/(puntos.length-1));
+  const py=y=>alto-pad-(alto-2*pad)*((y-min)/rango);
+  const d=puntos.map((p,i)=>(i?"L":"M")+px(i).toFixed(1)+" "+py(p.y).toFixed(1)).join(" ");
+  const area=d+` L ${px(puntos.length-1).toFixed(1)} ${alto-pad} L ${px(0).toFixed(1)} ${alto-pad} Z`;
+  const ult=puntos[puntos.length-1];
+  return `<svg viewBox="0 0 ${ancho} ${alto}" width="100%" height="${alto}" preserveAspectRatio="none"
+            role="img" aria-label="Valor del inventario a lo largo del tiempo">
+    <path d="${area}" fill="rgba(234,88,12,.10)"/>
+    <path d="${d}" fill="none" stroke="#EA580C" stroke-width="2"
+          stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${px(puntos.length-1).toFixed(1)}" cy="${py(ult.y).toFixed(1)}" r="3.5" fill="#EA580C"/>
+  </svg>`;
+}
+
+function pintarNivelInv(){
+  const caja=$("#nivel-inv"); if(!caja) return;
+  const cortes=(CORTES||[]).slice().sort((a,b)=>a.id.localeCompare(b.id));  // viejo → nuevo
+
+  // Hoy se calcula del catálogo en vivo, no del corte: es el dato exacto
+  const conEx=ITEMS.filter(i=>(i.exist||0)>0);
+  const valorHoy=ITEMS.reduce((s,i)=>s+(i.exist||0)*(i.costo||0),0);
+  const piezasHoy=conEx.reduce((s,i)=>s+i.exist,0);
+  const negs=ITEMS.filter(i=>(i.exist||0)<0);
+  const valorNeg=negs.reduce((s,i)=>s+i.exist*(i.costo||0),0);
+
+  const serie=cortes.map(c=>({x:c.id, y:valuarCorte(c).valor}));
+  let bloqueTendencia="";
+
+  if(serie.length>=2){
+    const ult=serie[serie.length-1], pri=serie[0];
+    const dif=ult.y-pri.y, pct=pri.y? dif/pri.y*100 : 0;
+    const dias=Math.max(1,Math.round((new Date(ult.x)-new Date(pri.x))/86400000));
+    const sube=dif>0;
+    bloqueTendencia=`
+      <div style="margin:14px 0 6px">${lineaSVG(serie,600,90)}</div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;opacity:.6">
+        <span>${esc(fechaCorta(pri.x))}</span><span>${esc(fechaCorta(ult.x))}</span>
+      </div>
+      <p style="margin:12px 0 0">
+        En <b>${dias} día${dias===1?"":"s"}</b> el inventario
+        ${sube?"subió":"bajó"} <b style="color:${sube?"#d97706":"#16a34a"}">${pesos(Math.abs(dif))}</b>
+        (${Math.abs(pct).toFixed(1)}%).
+        <br><span style="font-size:12px;opacity:.7">${serie.length} cortes, todos valuados a los costos de hoy
+        para que la línea muestre movimiento de mercancía y no cambios de costo.</span>
+      </p>`;
+  } else {
+    bloqueTendencia=`<p style="margin:12px 0 0;font-size:13px;opacity:.75">
+      Todavía no hay suficientes cortes para dibujar la tendencia. Se guarda uno
+      cada día de forma automática; con un par de días ya aparece la línea.</p>`;
+  }
+
+  // Dónde está parado el dinero
+  const porCat=new Map();
+  ITEMS.forEach(i=>{
+    const q=i.exist||0; if(q<=0) return;
+    const c=(i.cat||"").trim() || "Sin categoría";
+    const r=porCat.get(c) || {valor:0,piezas:0,claves:0};
+    r.valor += q*(i.costo||0); r.piezas += q; r.claves++;
+    porCat.set(c,r);
+  });
+  const cats=[...porCat.entries()].sort((a,b)=>b[1].valor-a[1].valor).slice(0,8);
+  const filasCat=cats.map(([n,r])=>`<tr>
+      <td style="padding:5px 0">${esc(n)}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${pesos(r.valor)}</td>
+      <td style="text-align:right;opacity:.6;font-variant-numeric:tabular-nums">${valorHoy?Math.round(r.valor/valorHoy*100):0}%</td>
+      <td style="text-align:right;opacity:.6;font-variant-numeric:tabular-nums">${r.piezas.toLocaleString("es-MX")}</td>
+    </tr>`).join("");
+
+  caja.innerHTML=`<div class="tarjeta">
+    <h3 style="margin-bottom:12px">Nivel de inventario</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:22px 34px">
+      <div><div style="font-size:11px;opacity:.6;letter-spacing:.06em">VALOR A COSTO</div>
+        <div style="font-size:26px;font-weight:700;font-variant-numeric:tabular-nums">${pesos(valorHoy)}</div></div>
+      <div><div style="font-size:11px;opacity:.6;letter-spacing:.06em">PIEZAS</div>
+        <div style="font-size:26px;font-weight:700;font-variant-numeric:tabular-nums">${piezasHoy.toLocaleString("es-MX")}</div></div>
+      <div><div style="font-size:11px;opacity:.6;letter-spacing:.06em">CLAVES CON EXISTENCIA</div>
+        <div style="font-size:26px;font-weight:700;font-variant-numeric:tabular-nums">${conEx.length.toLocaleString("es-MX")}</div>
+        <div style="font-size:11px;opacity:.6">de ${ITEMS.length.toLocaleString("es-MX")} en catálogo</div></div>
+    </div>
+    ${bloqueTendencia}
+    ${negs.length?`<p style="margin:12px 0 0;font-size:12px;color:#b45309">
+      ${negs.length} clave(s) con existencia negativa restan ${pesos(Math.abs(valorNeg))} de ese total.
+      Son errores de captura en SAIT, no mercancía.</p>`:""}
+  </div>
+  <div class="tarjeta">
+    <h3 style="margin-bottom:10px">Dónde está parado el dinero</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <tr style="font-size:11px;opacity:.6;letter-spacing:.05em;text-align:left">
+        <th style="padding-bottom:6px">CATEGORÍA</th>
+        <th style="text-align:right">VALOR</th><th style="text-align:right">%</th><th style="text-align:right">PIEZAS</th>
+      </tr>
+      ${filasCat}
+    </table>
+  </div>`;
 }
 
 /* Compara dos cortes y devuelve el movimiento por clave */
@@ -2488,7 +2619,10 @@ function pintar(){
   $("#n-pend").textContent = pendientes().length;
   $("#n-apa").textContent = activos().length;
   if(pestana==="buscar") pintarBuscar();
-  if(pestana==="mapa")   pintarMapa();
+  if(pestana==="mapa"){ pintarMapa();
+    /* Los cortes se piden solo al entrar aquí, no al arrancar la app */
+    cargarCortes().then(pintarNivelInv).catch(()=>pintarNivelInv());
+  }
   if(pestana==="pend")   pintarPend();
   if(pestana==="conteo") pintarConteo();
   if(pestana==="ventas") pintarVentas();
